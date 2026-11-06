@@ -1,0 +1,15 @@
+<th class="th-sort" @onclick="() => OnSort.InvokeAsync(Column)">
+    @Title
+    @if (string.Equals(Current, Column, StringComparison.OrdinalIgnoreCase))
+    {
+        <i class="ti @(Desc ? "ti-chevron-down" : "ti-chevron-up") ms-1"></i>
+    }
+</th>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public string Column { get; set; } = "";
+    [Parameter] public string? Current { get; set; }
+    [Parameter] public bool Desc { get; set; }
+    [Parameter] public EventCallback<string> OnSort { get; set; }
+}

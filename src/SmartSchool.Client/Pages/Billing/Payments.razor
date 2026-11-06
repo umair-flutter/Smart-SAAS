@@ -1,0 +1,63 @@
+@page "/payments"
+@inherits ListPageBase<PaymentDto>
+
+<PageTitle>@L["Payments"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Billing"]</div>
+    <h1 class="page-title">@L["Payments"]</h1>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3">
+        <div class="input-icon" style="max-width:320px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search invoice, tenant or reference…"]" @oninput="OnSearchInput" />
+        </div>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Date"]" Column="date" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Invoice"]</th>
+                    @if (State.IsSuperAdmin && State.ActiveTenantId is null)
+                    {
+                        <SortHeader Title="@L["Tenant"]" Column="tenant" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    }
+                    <th>@L["Method"]</th>
+                    <th>@L["Reference"]</th>
+                    <SortHeader Title="@L["Amount"]" Column="amount" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                </tr>
+            </thead>
+            <tbody>
+                @if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-secondary text-center py-4">@L["No payments recorded yet."]</td></tr>
+                }
+                @foreach (var p in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td>@Format.Date(p.PaidAtUtc)</td>
+                        <td><a href="invoices/@p.InvoiceId">@p.InvoiceNumber</a></td>
+                        @if (State.IsSuperAdmin && State.ActiveTenantId is null) { <td>@p.TenantName</td> }
+                        <td>@p.Method.DisplayName()</td>
+                        <td><code>@p.Reference</code></td>
+                        <td class="fw-semibold">@Format.Money(p.Amount, p.Currency)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+@code {
+    protected override string Endpoint => "api/payments";
+}

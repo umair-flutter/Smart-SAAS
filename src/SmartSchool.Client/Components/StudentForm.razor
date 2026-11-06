@@ -1,0 +1,79 @@
+@* Shared student create/edit form. The submit button lives in the modal footer (form="FormId"). *@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" id="@FormId">
+    <DataAnnotationsValidator />
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label required">@L["First name"]</label>
+            <InputText class="form-control" @bind-Value="Model.FirstName" />
+            <ValidationMessage For="() => Model.FirstName" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label required">@L["Last name"]</label>
+            <InputText class="form-control" @bind-Value="Model.LastName" />
+            <ValidationMessage For="() => Model.LastName" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Student no."]</label>
+            <InputText class="form-control" placeholder="@L["Generated if empty"]" @bind-Value="Model.StudentNo" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Date of birth"]</label>
+            <InputDate class="form-control" @bind-Value="Model.DateOfBirth" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Gender"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.Gender">
+                <option value="">@L["Not specified"]</option>
+                <option value="@Gender.Female">@L["Female"]</option>
+                <option value="@Gender.Male">@L["Male"]</option>
+            </InputSelect>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">@L["Email"]</label>
+            <InputText class="form-control" type="email" @bind-Value="Model.Email" />
+            <ValidationMessage For="() => Model.Email" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">@L["Phone"]</label>
+            <InputText class="form-control" @bind-Value="Model.Phone" />
+        </div>
+        <div class="col-md-8">
+            <label class="form-label">@L["Address"]</label>
+            <InputText class="form-control" @bind-Value="Model.Address" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Admission date"]</label>
+            <InputDate class="form-control" @bind-Value="Model.AdmissionDate" />
+        </div>
+        @if (ShowClass)
+        {
+            <div class="col-md-6">
+                <label class="form-label">@L["Enrol in class"]</label>
+                <InputSelect class="form-select" @bind-Value="Model.ClassId">
+                    <option value="">@L["Not now"]</option>
+                    @foreach (var c in Classes ?? [])
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </InputSelect>
+            </div>
+        }
+        <div class="col-md-6 d-flex align-items-end">
+            <label class="form-check form-switch mb-2">
+                <InputCheckbox class="form-check-input" @bind-Value="Model.IsActive" />
+                <span class="form-check-label">@L["Active"]</span>
+            </label>
+        </div>
+        <StatusSelect Model="Model" Category="StatusCategory.Student" />
+        <LoginFields Model="Model" HasLogin="HasLogin" RoleLabel="Student" />
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public StudentEditDto Model { get; set; } = default!;
+    [Parameter] public List<LookupItem>? Classes { get; set; }
+    [Parameter] public bool ShowClass { get; set; }
+    [Parameter] public bool HasLogin { get; set; }
+    [Parameter] public string FormId { get; set; } = "student-form";
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+}

@@ -1,0 +1,8 @@
+@if (S is { } s)
+{
+    <span class="badge text-white ms-1" style="background:@s.Color">@s.Name</span>
+}
+
+@code {
+    [Parameter] public StatusBadgeDto? S { get; set; }
+}

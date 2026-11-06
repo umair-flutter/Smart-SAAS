@@ -1,0 +1,30 @@
+@* Optional sign-in account for a teacher, student or parent record. *@
+<div class="col-12">
+    @if (HasLogin)
+    {
+        <div class="text-success small"><i class="ti ti-circle-check me-1"></i>@L["This person has a sign-in account. Manage it from the Users page."]</div>
+    }
+    else
+    {
+        <label class="form-check form-switch">
+            <InputCheckbox class="form-check-input" @bind-Value="Model.CreateLogin" />
+            <span class="form-check-label">@L["Create a sign-in account"] (@L[RoleLabel])</span>
+        </label>
+        @if (Model.CreateLogin)
+        {
+            <div class="row g-2 mt-1">
+                <div class="col-md-6">
+                    <InputText class="form-control" type="password" autocomplete="new-password" placeholder="@L["Password (8+ characters)"]" @bind-Value="Model.Password" />
+                    <ValidationMessage For="() => Model.Password" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6 small text-secondary d-flex align-items-center">@L["The email address above is used to sign in."]</div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PersonEditDto Model { get; set; } = default!;
+    [Parameter] public bool HasLogin { get; set; }
+    [Parameter] public string RoleLabel { get; set; } = "";
+}

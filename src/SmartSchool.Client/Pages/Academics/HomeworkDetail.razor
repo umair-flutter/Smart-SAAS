@@ -1,0 +1,325 @@
+@page "/homework/{Id:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject FileHelper Files
+@inject NavigationManager Nav
+
+<PageTitle>@(_h?.Title ?? "Homework") · SmartSchool</PageTitle>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_h is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    var overdue = _h.DueAtUtc < DateTime.UtcNow;
+    var mine = _h.Submissions.FirstOrDefault();
+    <div class="page-header mb-3">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <a href="homework" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Homework"]</a>
+                <h1 class="page-title mt-1">@_h.Title</h1>
+                <div class="text-secondary small mt-1">
+                    <span class="badge me-1" style="background:@_h.SubjectColor">@_h.SubjectName</span>
+                    @_h.ClassName · @_h.TeacherName · set @_h.AssignedAtUtc.ToLocalTime().ToString("d MMM")
+                </div>
+            </div>
+            @if (CanManage)
+            {
+                <div class="col-auto ms-auto btn-list">
+                    <button class="btn" @onclick="OpenEdit"><i class="ti ti-pencil me-1"></i>@L["Edit"]</button>
+                    <button class="btn btn-ghost-danger" @onclick="Delete"><i class="ti ti-trash me-1"></i>@L["Delete"]</button>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="row row-cards">
+        <div class="col-lg-5">
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-3">
+                        <div>
+                            <div class="text-secondary small">@L["Due"]</div>
+                            <div class="fw-bold @(overdue ? "text-danger" : "")">@_h.DueAtUtc.ToLocalTime().ToString("dddd d MMMM, HH:mm")</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="text-secondary small">@L["Marked out of"]</div>
+                            <div class="fw-bold">@(_h.MaxScore?.ToString("0.##") ?? "—")</div>
+                        </div>
+                    </div>
+                    <div class="text-secondary small mb-1">@L["Instructions"]</div>
+                    <p style="white-space:pre-line">@(_h.Instructions ?? "No instructions.")</p>
+                    @if (_h.Attachment is { } a)
+                    {
+                        <a role="button" class="btn btn-outline-primary btn-sm" @onclick="() => Files.DownloadAsync(a)"><i class="ti ti-paperclip me-1"></i>@a.FileName (@FileHelper.Size(a.Size))</a>
+                    }
+                    @if (CanManage)
+                    {
+                        <div class="mt-3">
+                            <label class="form-label small">@(_h.Attachment is null ? "Attach a file" : "Replace the attachment")</label>
+                            <InputFile class="form-control form-control-sm" OnChange="UploadAttachment" />
+                        </div>
+                    }
+                    <div class="mt-3 small text-secondary">@(_h.AllowLateSubmission ? "Late hand-ins are accepted and flagged." : "Late hand-ins are not accepted.")</div>
+                </div>
+            </div>
+
+            @if (IsStudent)
+            {
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">@L["My work"]</h3></div>
+                    <div class="card-body">
+                        @if (mine is { Status: not SubmissionStatus.Submitted })
+                        {
+                            <SubmissionView S="mine" Max="_h.MaxScore" />
+                        }
+                        else
+                        {
+                            @if (mine is not null)
+                            {
+                                <div class="alert alert-info py-2">Handed in @mine.SubmittedAtUtc.ToLocalTime().ToString("g")@(mine.IsLate ? " (late)" : ""). You can replace it until it is graded.</div>
+                            }
+                            @if (overdue && !_h.AllowLateSubmission)
+                            {
+                                <div class="alert alert-warning py-2 mb-0">@L["The deadline has passed."]</div>
+                            }
+                            else
+                            {
+                                <textarea class="form-control mb-2" rows="5" placeholder="@L["Write your answer…"]" @bind="_answer"></textarea>
+                                <InputFile class="form-control mb-2" OnChange="e => _answerFile = e.File" />
+                                @if (overdue) { <div class="text-warning small mb-2"><i class="ti ti-clock me-1"></i>@L["The deadline has passed; this will be marked late."]</div> }
+                                <button class="btn btn-primary" disabled="@_busy" @onclick="Submit"><i class="ti ti-send me-1"></i>@(mine is null ? "Hand in" : "Replace my work")</button>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+            else if (IsFamily)
+            {
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">@L["Your child's work"]</h3></div>
+                    <div class="card-body">
+                        @if (mine is null)
+                        {
+                            <span class="badge @(overdue ? "bg-red-lt" : "bg-secondary-lt")">@(overdue ? "Not handed in" : "Not handed in yet")</span>
+                        }
+                        else
+                        {
+                            <SubmissionView S="mine" Max="_h.MaxScore" />
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (!IsFamily)
+        {
+            <div class="col-lg-7">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title">@L["Submissions"] <span class="text-secondary ms-1">@_h.SubmittedCount / @_h.StudentCount</span></h3>
+                        <div class="card-actions small text-secondary">@_h.GradedCount graded · @_h.LateCount late</div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter">
+                            <thead><tr><th>@L["Student"]</th><th>@L["Handed in"]</th><th>@L["Work"]</th><th>@L["Score"]</th><th class="w-1"></th></tr></thead>
+                            <tbody>
+                                @if (_h.Submissions.Count == 0) { <tr><td colspan="5" class="text-secondary">@L["Nothing handed in yet."]</td></tr> }
+                                @foreach (var s in _h.Submissions)
+                                {
+                                    <tr>
+                                        <td class="fw-semibold">@s.StudentName</td>
+                                        <td class="small">@s.SubmittedAtUtc.ToLocalTime().ToString("g") @if (s.IsLate) { <span class="badge bg-yellow-lt ms-1">@L["Late"]</span> }</td>
+                                        <td class="small" style="max-width:240px">
+                                            <div class="text-truncate">@s.Text</div>
+                                            @if (s.Attachment is { } f) { <a role="button" @onclick="() => Files.DownloadAsync(f)"><i class="ti ti-paperclip me-1"></i>@f.FileName</a> }
+                                        </td>
+                                        <td>@(s.Score is { } sc ? $"{sc:0.##}" : s.Status == SubmissionStatus.Graded ? "✓" : "—")</td>
+                                        <td>
+                                            @if (State.Can(Permissions.Homework.Grade))
+                                            {
+                                                <button class="btn btn-sm @(s.Status == SubmissionStatus.Submitted ? "btn-primary" : "")" @onclick="() => OpenGrade(s)">@(s.Status == SubmissionStatus.Submitted ? "Grade" : "Edit")</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                @if (_h.Missing.Count > 0)
+                {
+                    <div class="card">
+                        <div class="card-header"><h3 class="card-title">@L["Not handed in"] <span class="text-secondary ms-1">@_h.Missing.Count</span></h3></div>
+                        <div class="card-body d-flex flex-wrap gap-2">
+                            @foreach (var m in _h.Missing) { <span class="badge @(overdue ? "bg-red-lt" : "bg-secondary-lt")">@m.Name</span> }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+<Modal @bind-Visible="_grading" Title="@($"Grade: {_gradeTarget?.StudentName}")">
+    <ChildContent>
+        @if (_gradeTarget is { } g)
+        {
+            <div class="border rounded p-2 mb-3 small" style="white-space:pre-line; max-height:200px; overflow:auto">@(g.Text ?? "No text answer.")</div>
+            @if (g.Attachment is { } f) { <a role="button" class="btn btn-sm mb-3" @onclick="() => Files.DownloadAsync(f)"><i class="ti ti-download me-1"></i>@f.FileName</a> }
+        }
+        <div class="row g-3">
+            <div class="col-md-5">
+                <label class="form-label">Score @(_h?.MaxScore is { } m ? $"/ {m:0.##}" : "")</label>
+                <input type="number" step="0.25" min="0" class="form-control" @bind="_grade.Score" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Feedback"]</label>
+                <textarea class="form-control" rows="3" @bind="_grade.Feedback"></textarea>
+            </div>
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _grading = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveGrade">@L["Save grade"]</button>
+    </Footer>
+</Modal>
+
+<Modal @bind-Visible="_editing" Title="@L["Edit homework"]" Size="lg">
+    <ChildContent>
+        <HomeworkForm Model="_form" Lookups="_lookups" FormId="hw-edit-form" OnValidSubmit="SaveEdit" />
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="hw-edit-form" disabled="@_busy">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromQuery] public Guid? StudentId { get; set; }
+
+    private HomeworkDetailDto? _h;
+    private SchoolLookupsDto? _lookups;
+    private string? _error, _modalError;
+    private bool _busy, _grading, _editing;
+    private string? _answer;
+    private IBrowserFile? _answerFile;
+    private SubmissionDto? _gradeTarget;
+    private GradeSubmissionDto _grade = new();
+    private HomeworkEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private bool IsFamily => State.User?.RoleType is RoleType.Parent or RoleType.Student;
+    private bool IsStudent => State.User?.RoleType == RoleType.Student;
+    private bool CanManage => State.Can(Permissions.Homework.Manage) && !IsFamily;
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _h = await Api.GetAsync<HomeworkDetailDto>($"api/homework/{Id}{(StudentId is { } s ? $"?studentId={s}" : "")}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task UploadAttachment(InputFileChangeEventArgs e)
+    {
+        using var form = new MultipartFormDataContent();
+        if (!Files.TryAdd(form, e.File)) return;
+        try
+        {
+            await Api.PostFormAsync<FileDto>($"api/homework/{Id}/attachment", form);
+            Toasts.Success(L["File attached."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Submit()
+    {
+        using var form = new MultipartFormDataContent();
+        if (!string.IsNullOrWhiteSpace(_answer)) form.Add(new StringContent(_answer), "text");
+        if (!Files.TryAdd(form, _answerFile)) return;
+        _busy = true;
+        try
+        {
+            await Api.PostFormAsync($"api/homework/{Id}/submit", form);
+            Toasts.Success(L["Your work has been handed in."]);
+            _answer = null;
+            _answerFile = null;
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    private void OpenGrade(SubmissionDto s)
+    {
+        _gradeTarget = s;
+        _grade = new GradeSubmissionDto { Score = s.Score, Feedback = s.Feedback };
+        _modalError = null;
+        _grading = true;
+    }
+
+    private async Task SaveGrade()
+    {
+        if (_gradeTarget is null) return;
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PostAsync($"api/homework/submissions/{_gradeTarget.Id}/grade", _grade);
+            _grading = false;
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task OpenEdit()
+    {
+        try { _lookups ??= await Api.GetAsync<SchoolLookupsDto>("api/school/lookups"); } catch (ApiException) { }
+        _form = new HomeworkEditDto
+        {
+            ClassId = _h!.ClassId, SubjectId = _h.SubjectId, Title = _h.Title, Instructions = _h.Instructions, DueAtUtc = _h.DueAtUtc,
+            MaxScore = _h.MaxScore, AllowLateSubmission = _h.AllowLateSubmission, IsPublished = _h.IsPublished
+        };
+        _modalError = null;
+        _editing = true;
+    }
+
+    private async Task SaveEdit()
+    {
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PutAsync($"api/homework/{Id}", _form);
+            _editing = false;
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        if (!await _confirm.AskAsync(L["Delete homework?"], $"\"{_h!.Title}\" will be removed.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/homework/{Id}");
+            Nav.NavigateTo("homework");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

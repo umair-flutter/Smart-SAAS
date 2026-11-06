@@ -1,0 +1,135 @@
+@page "/profile"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>@L["My profile"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Account"]</div>
+    <h1 class="page-title">@L["My profile"]</h1>
+</div>
+
+<div class="row row-cards">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">@L["Personal details"]</h3></div>
+            <div class="card-body">
+                <EditForm Model="_profile" OnValidSubmit="SaveProfile" id="profile-form">
+                    <DataAnnotationsValidator />
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required">@L["First name"]</label>
+                            <InputText class="form-control" @bind-Value="_profile.FirstName" />
+                            <ValidationMessage For="() => _profile.FirstName" class="invalid-feedback d-block" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required">@L["Last name"]</label>
+                            <InputText class="form-control" @bind-Value="_profile.LastName" />
+                            <ValidationMessage For="() => _profile.LastName" class="invalid-feedback d-block" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">@L["Email"]</label>
+                            <input class="form-control" value="@State.User?.Email" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">@L["Phone"]</label>
+                            <InputText class="form-control" @bind-Value="_profile.Phone" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">@L["Language"]</label>
+                            <div class="btn-group w-100" role="group">
+                                @foreach (var (code, name) in Localizer.Languages)
+                                {
+                                    <button type="button" class="btn @(_profile.Language == code ? "btn-primary" : "")" @onclick="() => _profile.Language = code">@name</button>
+                                }
+                            </div>
+                            <div class="form-hint">@L["Arabic switches the whole interface to right-to-left."]</div>
+                        </div>
+                        <div class="col-12">
+                            <div class="small text-secondary">@L["Role"]: <b>@State.User?.RoleName</b>@(State.User?.TenantName is { } t ? $" · {t}" : "")</div>
+                        </div>
+                    </div>
+                </EditForm>
+            </div>
+            <div class="card-footer d-flex"><button class="btn btn-primary ms-auto" type="submit" form="profile-form" disabled="@_busy">@L["Save"]</button></div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">@L["Change password"]</h3></div>
+            <div class="card-body">
+                <EditForm Model="_password" OnValidSubmit="ChangePassword" id="password-form">
+                    <DataAnnotationsValidator />
+                    <div class="mb-3">
+                        <label class="form-label required">@L["Current password"]</label>
+                        <InputText type="password" class="form-control" autocomplete="current-password" @bind-Value="_password.CurrentPassword" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required">@L["New password"]</label>
+                        <InputText type="password" class="form-control" autocomplete="new-password" @bind-Value="_password.NewPassword" />
+                        <div class="form-hint">@L["At least 8 characters with letters and numbers."]</div>
+                        <ValidationMessage For="() => _password.NewPassword" class="invalid-feedback d-block" />
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label required">@L["Repeat the new password"]</label>
+                        <input type="password" class="form-control" autocomplete="new-password" @bind="_repeat" />
+                    </div>
+                    @if (_pwError is not null) { <div class="alert alert-danger mt-3 mb-0">@_pwError</div> }
+                </EditForm>
+                <div class="small text-secondary mt-3"><i class="ti ti-info-circle me-1"></i>@L["Your other signed-in devices will be signed out."]</div>
+            </div>
+            <div class="card-footer d-flex"><button class="btn btn-primary ms-auto" type="submit" form="password-form" disabled="@_busy">@L["Change password"]</button></div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private ProfileUpdateDto _profile = new();
+    private ChangePasswordDto _password = new();
+    private string? _repeat;
+    private string? _pwError;
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        var parts = (State.User?.FullName ?? "").Split(' ', 2);
+        _profile = new ProfileUpdateDto
+        {
+            FirstName = parts.ElementAtOrDefault(0) ?? "",
+            LastName = parts.ElementAtOrDefault(1) ?? "",
+            Language = L.Language
+        };
+    }
+
+    private async Task SaveProfile()
+    {
+        _busy = true;
+        try
+        {
+            var user = await Api.PutAsync<CurrentUserDto>("api/me/profile", _profile);
+            State.SetUser(user);
+            if (_profile.Language != L.Language) await Localizer.ChangeAsync(JS, _profile.Language);
+            else Toasts.Success(L["Profile saved."]);
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    private async Task ChangePassword()
+    {
+        _pwError = null;
+        if (_password.NewPassword != _repeat) { _pwError = L["The two new passwords do not match."]; return; }
+        _busy = true;
+        try
+        {
+            await Api.PostAsync("api/me/password", _password);
+            _password = new ChangePasswordDto();
+            _repeat = null;
+            Toasts.Success(L["Password changed."]);
+        }
+        catch (ApiException ex) { _pwError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+}

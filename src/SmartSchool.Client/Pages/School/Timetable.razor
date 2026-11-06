@@ -1,0 +1,278 @@
+@page "/timetable"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@L["Timetable"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3 d-print-none">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["School"]</div>
+            <h1 class="page-title">@L["Timetable"]</h1>
+        </div>
+        <div class="col-auto ms-auto btn-list">
+            <button class="btn" @onclick="Print"><i class="ti ti-printer me-1"></i>@L["Print"]</button>
+            @if (CanManage && _mode == "class" && _selectedId is not null)
+            {
+                <button class="btn btn-primary" @onclick="() => OpenLesson(null, DayOfWeek.Monday)"><i class="ti ti-plus me-1"></i>@L["Add lesson"]</button>
+            }
+        </div>
+    </div>
+</div>
+
+<SchoolHint />
+
+<div class="card mb-3 d-print-none">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+        <div class="btn-group" role="group">
+            @foreach (var (key, label) in new[] { ("class", "Class"), ("teacher", "Teacher"), ("room", "Room") })
+            {
+                <button type="button" class="btn @(_mode == key ? "btn-primary" : "")" @onclick="() => SetMode(key)">@label</button>
+            }
+        </div>
+        <select class="form-select" style="max-width:280px" value="@_selectedId" @onchange="OnSelect">
+            <option value="">Choose a @_mode…</option>
+            @foreach (var item in Options)
+            {
+                <option value="@item.Id">@item.Name</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_selectedId is null)
+{
+    <div class="empty"><p class="empty-title">Choose a @_mode to see its week</p></div>
+}
+else if (_slots is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    <h3 class="d-none d-print-block">@Options.FirstOrDefault(o => o.Id == _selectedId)?.Name</h3>
+    <div class="row g-2">
+        @foreach (var day in Days)
+        {
+            var lessons = _slots.Where(s => s.DayOfWeek == day).OrderBy(s => s.StartTime).ToList();
+            <div class="col-md">
+                <div class="card h-100">
+                    <div class="card-header py-2 d-flex">
+                        <span class="fw-semibold">@day</span>
+                        @if (CanManage && _mode == "class")
+                        {
+                            <button class="btn btn-sm btn-icon btn-ghost-primary ms-auto d-print-none" title="Add lesson on @day" @onclick="() => OpenLesson(null, day)"><i class="ti ti-plus"></i></button>
+                        }
+                    </div>
+                    <div class="card-body p-2 d-grid gap-2 align-content-start">
+                        @if (lessons.Count == 0) { <div class="text-secondary small text-center py-2">@L["No lessons"]</div> }
+                        @foreach (var l in lessons)
+                        {
+                            <div class="rounded p-2 small @(CanManage ? "cursor-pointer" : "")" role="@(CanManage ? "button" : null)"
+                                 style="background:@(l.SubjectColor)1a; border-inline-start:4px solid @l.SubjectColor"
+                                 @onclick="() => { if (CanManage) OpenLesson(l, l.DayOfWeek); }">
+                                <div class="fw-semibold">@l.StartTime.ToString("HH:mm")–@l.EndTime.ToString("HH:mm")</div>
+                                <div>@l.SubjectName</div>
+                                <div class="text-secondary">
+                                    @if (_mode != "class") { <span>@l.ClassName · </span> }
+                                    @if (_mode != "teacher" && l.TeacherName is not null) { <span>@l.TeacherName</span> }
+                                    @if (_mode != "room" && l.RoomName is not null) { <span> · @l.RoomName</span> }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+    <div class="text-secondary small mt-2 d-print-none">@_slots.Count lessons · @(_slots.Sum(s => (s.EndTime - s.StartTime).TotalHours).ToString("0.#")) hours per week</div>
+}
+
+<Modal @bind-Visible="_editing" Title="@(_lessonId is null ? L["Add lesson"] : L["Edit lesson"])">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">@L["Day"]</label>
+                <select class="form-select" @bind="_lesson.DayOfWeek">
+                    @foreach (var d in AllDays) { <option value="@d">@d</option> }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Starts"]</label>
+                <input type="time" class="form-control" @bind="_lesson.StartTime" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Ends"]</label>
+                <input type="time" class="form-control" @bind="_lesson.EndTime" />
+            </div>
+            <div class="col-12">
+                <label class="form-label required">@L["Subject"]</label>
+                <select class="form-select" @bind="_subject">
+                    <option value="">@L["Select…"]</option>
+                    @foreach (var s in _lookups?.Subjects ?? []) { <option value="@s.Id">@s.Name</option> }
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Teacher"]</label>
+                <select class="form-select" @bind="_teacher">
+                    <option value="">@L["Assigned teacher"]</option>
+                    @foreach (var t in _lookups?.Teachers ?? []) { <option value="@t.Id">@t.Name</option> }
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Room"]</label>
+                <select class="form-select" @bind="_room">
+                    <option value="">@L["Class room"]</option>
+                    @foreach (var r in _lookups?.Rooms ?? []) { <option value="@r.Id">@r.Name</option> }
+                </select>
+            </div>
+            <div class="col-12 form-hint">@L["Clashes with the class, the teacher or the room are rejected."]</div>
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        @if (_lessonId is not null)
+        {
+            <button class="btn btn-ghost-danger" @onclick="DeleteLesson"><i class="ti ti-trash me-1"></i>@L["Delete"]</button>
+        }
+        <button class="btn btn-link link-secondary ms-auto" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@_busy" @onclick="SaveLesson">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? ClassId { get; set; }
+
+    private static readonly DayOfWeek[] AllDays = [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday];
+
+    private string _mode = "class";
+    private Guid? _selectedId;
+    private SchoolLookupsDto? _lookups;
+    private List<TimetableSlotDto>? _slots;
+    private string? _error;
+
+    private bool _editing;
+    private bool _busy;
+    private string? _modalError;
+    private Guid? _lessonId;
+    private TimetableSlotEditDto _lesson = new();
+    private string _subject = "";
+    private string _teacher = "";
+    private string _room = "";
+
+    private bool CanManage => State.Can(Permissions.Timetable.Manage);
+
+    private IEnumerable<DayOfWeek> Days => _slots?.Any(s => s.DayOfWeek == DayOfWeek.Saturday) == true ? AllDays : AllDays[..5];
+
+    private List<LookupItem> Options => _mode switch
+    {
+        "teacher" => _lookups?.Teachers ?? [],
+        "room" => _lookups?.Rooms ?? [],
+        _ => _lookups?.Classes ?? []
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += OnContextChanged;
+        await LoadLookups();
+        _selectedId = ClassId ?? _lookups?.Classes.FirstOrDefault()?.Id;
+        await LoadSlots();
+    }
+
+    private async Task LoadLookups()
+    {
+        try { _lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task OnContextChanged()
+    {
+        await LoadLookups();
+        _selectedId = Options.FirstOrDefault()?.Id;
+        await LoadSlots();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetMode(string mode)
+    {
+        _mode = mode;
+        _selectedId = Options.FirstOrDefault()?.Id;
+        await LoadSlots();
+    }
+
+    private async Task OnSelect(ChangeEventArgs e)
+    {
+        _selectedId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        await LoadSlots();
+    }
+
+    private async Task LoadSlots()
+    {
+        _slots = null;
+        _error = null;
+        if (_selectedId is null) return;
+        try { _slots = await Api.GetAsync<List<TimetableSlotDto>>($"api/timetable?{_mode}Id={_selectedId}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private void OpenLesson(TimetableSlotDto? l, DayOfWeek day)
+    {
+        _lessonId = l?.Id;
+        var last = _slots?.Where(s => s.DayOfWeek == day).OrderBy(s => s.EndTime).LastOrDefault();
+        var start = l?.StartTime ?? last?.EndTime.AddMinutes(5) ?? new TimeOnly(8, 30);
+        _lesson = new TimetableSlotEditDto
+        {
+            ClassId = l?.ClassId ?? _selectedId,
+            DayOfWeek = l?.DayOfWeek ?? day,
+            StartTime = start,
+            EndTime = l?.EndTime ?? start.AddMinutes(55)
+        };
+        _subject = l?.SubjectId.ToString() ?? "";
+        _teacher = l?.TeacherId?.ToString() ?? "";
+        _room = l?.RoomId?.ToString() ?? "";
+        _modalError = null;
+        _editing = true;
+    }
+
+    private async Task SaveLesson()
+    {
+        if (!Guid.TryParse(_subject, out var sid)) { _modalError = L["Select a subject."]; return; }
+        _lesson.SubjectId = sid;
+        _lesson.TeacherId = Guid.TryParse(_teacher, out var t) ? t : null;
+        _lesson.RoomId = Guid.TryParse(_room, out var r) ? r : null;
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            if (_lessonId is { } id) await Api.PutAsync($"api/timetable/{id}", _lesson);
+            else await Api.PostAsync<object>("api/timetable", _lesson);
+            _editing = false;
+            await LoadSlots();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteLesson()
+    {
+        if (_lessonId is not { } id) return;
+        try
+        {
+            await Api.DeleteAsync($"api/timetable/{id}");
+            _editing = false;
+            await LoadSlots();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+    }
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+    private async Task Print() => await JS.InvokeVoidAsync("print");
+
+    public void Dispose() => State.ContextChanged -= OnContextChanged;
+}

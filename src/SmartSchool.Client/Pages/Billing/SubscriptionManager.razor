@@ -1,0 +1,337 @@
+@inherits ListPageBase<SubscriptionDto>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Platform"]</div>
+            <h1 class="page-title">@L["Subscriptions"]</h1>
+        </div>
+        <div class="col-auto ms-auto btn-list">
+            <button class="btn" title="@L["Expire finished periods and auto-renew now"]" @onclick="RunMaintenance"><i class="ti ti-refresh me-1"></i>@L["Run renewals"]</button>
+            <button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New subscription"]</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex flex-wrap gap-2">
+        <div class="input-icon" style="max-width:320px; flex:1 1 220px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search tenant or plan…"]" @oninput="OnSearchInput" />
+        </div>
+        <select class="form-select" style="max-width:200px" @onchange="OnStatusFilter">
+            <option value="">@L["All statuses"]</option>
+            @foreach (var s in Enum.GetValues<SubscriptionStatus>())
+            {
+                <option value="@s">@s</option>
+            }
+        </select>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Tenant"]" Column="tenant" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Plan"]" Column="plan" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Period"]</th>
+                    <SortHeader Title="@L["Ends"]" Column="end" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Price"]</th>
+                    <SortHeader Title="@L["Status"]" Column="status" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th class="w-1"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-secondary text-center py-4">@L["No subscriptions found."]</td></tr>
+                }
+                @foreach (var s in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td class="fw-semibold">@s.TenantName</td>
+                        <td>@s.PlanName <span class="text-secondary small">· @s.BillingCycle</span></td>
+                        <td class="text-secondary small">@Format.Date(s.StartUtc) to @Format.Date(s.EndUtc)</td>
+                        <td class="small">@(s.IsCurrent ? $"{s.DaysRemaining} day(s) left" : "—")</td>
+                        <td>@Format.Money(s.Price, s.Currency)</td>
+                        <td>
+                            <StatusBadge Status="s.Status" />
+                            @if (s.AutoRenew) { <i class="ti ti-repeat text-secondary ms-1" title="@L["Renews automatically"]"></i> }
+                        </td>
+                        <td>
+                            <div class="dropdown position-relative">
+                                <button class="btn btn-sm btn-ghost-secondary" @onclick="() => _menuFor = _menuFor == s.Id ? null : s.Id"><i class="ti ti-dots-vertical"></i></button>
+                                @if (_menuFor == s.Id)
+                                {
+                                    <div class="dropdown-menu dropdown-menu-end show" style="position:absolute; inset-inline-end:0; top:100%">
+                                        @if (s.Status is SubscriptionStatus.Active or SubscriptionStatus.Trial or SubscriptionStatus.Expired or SubscriptionStatus.Cancelled)
+                                        {
+                                            <a class="dropdown-item" role="button" @onclick="() => OpenRenew(s)"><i class="ti ti-refresh me-2"></i>@(s.Status == SubscriptionStatus.Trial ? "Convert to paid" : "Renew / change plan")</a>
+                                        }
+                                        @if (s.Status is SubscriptionStatus.Active or SubscriptionStatus.Trial)
+                                        {
+                                            <a class="dropdown-item" role="button" @onclick="() => ToggleAutoRenew(s)"><i class="ti ti-repeat me-2"></i>Turn auto-renew @(s.AutoRenew ? "off" : "on")</a>
+                                            <a class="dropdown-item text-warning" role="button" @onclick="() => SetStatus(s, SubscriptionStatus.Suspended)"><i class="ti ti-player-pause me-2"></i>@L["Suspend"]</a>
+                                        }
+                                        @if (s.Status == SubscriptionStatus.Suspended)
+                                        {
+                                            <a class="dropdown-item text-success" role="button" @onclick="() => SetStatus(s, SubscriptionStatus.Active)"><i class="ti ti-player-play me-2"></i>@L["Reactivate"]</a>
+                                        }
+                                        @if (s.Status is not SubscriptionStatus.Cancelled and not SubscriptionStatus.Expired)
+                                        {
+                                            <a class="dropdown-item text-danger" role="button" @onclick="() => SetStatus(s, SubscriptionStatus.Cancelled)"><i class="ti ti-ban me-2"></i>@L["Cancel"]</a>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_creating" Title="@L["New subscription"]">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label required">@L["Tenant"]</label>
+                <select class="form-select" @bind="_newTenantId">
+                    <option value="">@L["Select a tenant…"]</option>
+                    @foreach (var t in State.User?.Tenants ?? [])
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label required">@L["Plan"]</label>
+                <select class="form-select" @bind="_newPlanId">
+                    <option value="">@L["Select a plan…"]</option>
+                    @foreach (var p in _plans.Where(p => p.IsActive))
+                    {
+                        <option value="@p.Id">@p.Name (@Format.Money(p.PriceMonthly, p.Currency) / month, @Format.Money(p.PriceYearly, p.Currency) / year)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Type"]</label>
+                <select class="form-select" @bind="_create.Status">
+                    <option value="@SubscriptionStatus.Active">@L["Paid period"]</option>
+                    <option value="@SubscriptionStatus.Trial">@L["Free trial"]</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Billing cycle"]</label>
+                <select class="form-select" @bind="_create.BillingCycle">
+                    <option value="@BillingCycle.Monthly">@L["Monthly"]</option>
+                    <option value="@BillingCycle.Yearly">@L["Yearly"]</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-check">
+                    <input type="checkbox" class="form-check-input" @bind="_create.CreateInvoice" />
+                    <span class="form-check-label">@L["Issue an invoice for this period"]</span>
+                </label>
+                <label class="form-check">
+                    <input type="checkbox" class="form-check-input" @bind="_create.AutoRenew" />
+                    <span class="form-check-label">@L["Renew automatically at the end of the period"]</span>
+                </label>
+            </div>
+            <div class="col-12">
+                <div class="alert alert-info mb-0 py-2 small">@L["Any running period of this tenant ends when the new one starts."]</div>
+            </div>
+        </div>
+        @if (_modalError is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">@_modalError</div>
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _creating = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveNew">@L["Start subscription"]</button>
+    </Footer>
+</Modal>
+
+<Modal @bind-Visible="_renewing" Title="@($"Renew: {_renewTarget?.TenantName}")">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label">@L["Plan"]</label>
+                <select class="form-select" @bind="_renewPlanId">
+                    @foreach (var p in _plans.Where(p => p.IsActive))
+                    {
+                        <option value="@p.Id">@p.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Billing cycle"]</label>
+                <select class="form-select" @bind="_renewCycle">
+                    <option value="@BillingCycle.Monthly">@L["Monthly"]</option>
+                    <option value="@BillingCycle.Yearly">@L["Yearly"]</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-check">
+                    <input type="checkbox" class="form-check-input" @bind="_renewInvoice" />
+                    <span class="form-check-label">@L["Issue an invoice for the new period"]</span>
+                </label>
+                <div class="form-hint">@L["A running paid period is extended from its end date. Trials and lapsed periods restart today."]</div>
+            </div>
+        </div>
+        @if (_modalError is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">@_modalError</div>
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _renewing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveRenew">@L["Renew"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/subscriptions";
+    protected override string? ExtraQuery => _status is null ? null : $"status={_status}";
+
+    private SubscriptionStatus? _status;
+    private Guid? _menuFor;
+    private List<PlanDto> _plans = [];
+    private bool _busy;
+    private string? _modalError;
+    private ConfirmDialog _confirm = default!;
+
+    private bool _creating;
+    private SubscriptionCreateDto _create = new();
+    private string _newTenantId = "";
+    private string _newPlanId = "";
+
+    private bool _renewing;
+    private SubscriptionDto? _renewTarget;
+    private Guid _renewPlanId;
+    private BillingCycle _renewCycle;
+    private bool _renewInvoice = true;
+
+    protected override async Task OnInitializedPageAsync()
+    {
+        try { _plans = await Api.GetAsync<List<PlanDto>>("api/plans"); }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task OnStatusFilter(ChangeEventArgs e)
+    {
+        _status = Enum.TryParse<SubscriptionStatus>(e.Value?.ToString(), out var s) ? s : null;
+        Query.Page = 1;
+        await LoadAsync();
+    }
+
+    private void New()
+    {
+        _create = new SubscriptionCreateDto();
+        _newTenantId = State.ActiveTenantId?.ToString() ?? "";
+        _newPlanId = "";
+        _modalError = null;
+        _creating = true;
+    }
+
+    private async Task SaveNew()
+    {
+        _modalError = null;
+        if (!Guid.TryParse(_newTenantId, out var tid) || !Guid.TryParse(_newPlanId, out var pid))
+        {
+            _modalError = L["Select a tenant and a plan."];
+            return;
+        }
+        _create.TenantId = tid;
+        _create.PlanId = pid;
+        _busy = true;
+        try
+        {
+            await Api.PostAsync<object>("api/subscriptions", _create);
+            _creating = false;
+            Toasts.Success(L["Subscription started."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private void OpenRenew(SubscriptionDto s)
+    {
+        _menuFor = null;
+        _renewTarget = s;
+        _renewPlanId = _plans.Any(p => p.Id == s.PlanId && p.IsActive) ? s.PlanId : _plans.FirstOrDefault(p => p.IsActive)?.Id ?? s.PlanId;
+        _renewCycle = s.BillingCycle;
+        _renewInvoice = true;
+        _modalError = null;
+        _renewing = true;
+    }
+
+    private async Task SaveRenew()
+    {
+        if (_renewTarget is null) return;
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PostAsync<object>($"api/subscriptions/{_renewTarget.Id}/renew",
+                new SubscriptionRenewDto { PlanId = _renewPlanId, BillingCycle = _renewCycle, CreateInvoice = _renewInvoice });
+            _renewing = false;
+            Toasts.Success(L["Subscription renewed."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task SetStatus(SubscriptionDto s, SubscriptionStatus status)
+    {
+        _menuFor = null;
+        var (title, text, button) = status switch
+        {
+            SubscriptionStatus.Suspended => ("Suspend subscription?", $"Users of {s.TenantName} will be signed out and blocked until it is reactivated.", "Suspend"),
+            SubscriptionStatus.Cancelled => ("Cancel subscription?", $"{s.TenantName} loses access immediately and the subscription will not renew.", "Cancel subscription"),
+            _ => ("Reactivate subscription?", $"{s.TenantName} regains access until {Format.Date(s.EndUtc)}.", "Reactivate")
+        };
+        if (!await _confirm.AskAsync(title, text, button)) return;
+        try
+        {
+            await Api.PostAsync($"api/subscriptions/{s.Id}/status", new SubscriptionStatusChangeDto { Status = status });
+            Toasts.Success(L["Subscription updated."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task ToggleAutoRenew(SubscriptionDto s)
+    {
+        _menuFor = null;
+        try
+        {
+            await Api.PostAsync($"api/subscriptions/{s.Id}/auto-renew?enabled={(!s.AutoRenew).ToString().ToLowerInvariant()}");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task RunMaintenance()
+    {
+        try
+        {
+            var r = await Api.PostAsync<Dictionary<string, int>>("api/subscriptions/maintenance", null);
+            Toasts.Info($"{r.GetValueOrDefault("expired")} expired, {r.GetValueOrDefault("renewed")} renewed.");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

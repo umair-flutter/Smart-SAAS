@@ -1,0 +1,142 @@
+@page "/settings/status-options"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@L["Status options"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Settings"]</div>
+            <h1 class="page-title">@L["Status options"]</h1>
+            <div class="text-secondary small mt-1">@L["Labels your organization uses for students, teachers and parents. They appear as coloured badges."]</div>
+        </div>
+        @if (State.Can(Permissions.Schools.Edit))
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="() => Open(null)"><i class="ti ti-plus me-1"></i>@L["New status"]</button></div>
+        }
+    </div>
+</div>
+
+@if (_error is not null) { <div class="alert alert-danger">@_error</div> }
+
+<div class="row row-cards">
+    @foreach (var cat in Enum.GetValues<StatusCategory>())
+    {
+        var items = _items?.Where(i => i.Category == cat).ToList() ?? [];
+        <div class="col-lg-4">
+            <div class="card h-100">
+                <div class="card-header"><h3 class="card-title">@L[CategoryName(cat)]</h3></div>
+                <div class="list-group list-group-flush">
+                    @if (items.Count == 0) { <div class="list-group-item text-secondary">@L["No status options yet."]</div> }
+                    @foreach (var s in items)
+                    {
+                        <div class="list-group-item d-flex align-items-center gap-2">
+                            <span class="badge text-white" style="background:@s.Color">@s.Name</span>
+                            @if (!s.IsActive) { <span class="badge bg-secondary-lt">@L["Inactive"]</span> }
+                            <span class="small text-secondary ms-auto">@L.F("{0} in use", s.UsageCount)</span>
+                            @if (State.Can(Permissions.Schools.Edit))
+                            {
+                                <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Open(s)"><i class="ti ti-pencil"></i></button>
+                                @if (s.UsageCount == 0)
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(s)"><i class="ti ti-trash"></i></button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_form.Id == Guid.Empty ? L["New status"] : L["Edit status"])">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">@L["Applies to"]</label>
+                <select class="form-select" @bind="_form.Category" disabled="@(_form.Id != Guid.Empty)">
+                    @foreach (var c in Enum.GetValues<StatusCategory>()) { <option value="@c">@L[CategoryName(c)]</option> }
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label required">@L["Name"]</label>
+                <input class="form-control" maxlength="60" @bind="_form.Name" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Color"]</label>
+                <input type="color" class="form-control form-control-color w-100" @bind="_form.Color" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Display order"]</label>
+                <input type="number" class="form-control" @bind="_form.SortOrder" />
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <label class="form-check form-switch mb-2"><input type="checkbox" class="form-check-input" @bind="_form.IsActive" /><span class="form-check-label">@L["Active"]</span></label>
+            </div>
+            <div class="col-12">@L["Preview"]: <span class="badge text-white" style="background:@_form.Color">@(_form.Name.Length == 0 ? "…" : _form.Name)</span></div>
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">@L["Cancel"]</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="Save">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    private List<StatusOptionDto>? _items;
+    private StatusOptionDto _form = new();
+    private bool _editing, _busy;
+    private string? _error, _modalError;
+    private ConfirmDialog _confirm = default!;
+
+    public static string CategoryName(StatusCategory c) => c switch
+    {
+        StatusCategory.Student => "Students",
+        StatusCategory.Teacher => "Teachers",
+        _ => "Parents & guardians"
+    };
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _items = await Api.GetAsync<List<StatusOptionDto>>("api/status-options"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private void Open(StatusOptionDto? s)
+    {
+        _form = s is null ? new StatusOptionDto() : new StatusOptionDto { Id = s.Id, Category = s.Category, Name = s.Name, Color = s.Color, SortOrder = s.SortOrder, IsActive = s.IsActive };
+        _modalError = null;
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Name)) { _modalError = L["Enter a name."]; return; }
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            if (_form.Id == Guid.Empty) await Api.PostAsync<object>("api/status-options", _form);
+            else await Api.PutAsync($"api/status-options/{_form.Id}", _form);
+            _editing = false;
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete(StatusOptionDto s)
+    {
+        if (!await _confirm.AskAsync(L["Delete status?"], s.Name, L["Delete"])) return;
+        try { await Api.DeleteAsync($"api/status-options/{s.Id}"); await Load(); }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

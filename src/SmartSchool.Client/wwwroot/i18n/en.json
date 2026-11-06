@@ -1,0 +1,19 @@
+{
+  "SignedIn": "Signed in",
+  "SignInFailed": "Failed sign-in",
+  "SignedOut": "Signed out",
+  "AppUser": "User",
+  "AcademicYear": "Academic year",
+  "SchoolClass": "Class",
+  "TeachingAssignment": "Teaching assignment",
+  "TimetableSlot": "Timetable lesson",
+  "StoredFile": "File",
+  "AbsenceReason": "Absence reason",
+  "AttendanceRecord": "Attendance",
+  "HomeworkSubmission": "Homework submission",
+  "ExamResult": "Exam result",
+  "ReportCard": "Report card",
+  "StatusOption": "Status option",
+  "UserSession": "Session",
+  "Guardian": "Parent / guardian"
+}

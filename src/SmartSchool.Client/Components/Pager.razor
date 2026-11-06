@@ -1,0 +1,45 @@
+@if (TotalCount > 0)
+{
+    <div class="card-footer d-flex flex-wrap gap-2 align-items-center">
+        <p class="m-0 text-secondary">@L.F("Showing {0} to {1} of {2} entries", From, To, TotalCount)</p>
+        <ul class="pagination m-0 ms-auto">
+            <li class="page-item @(Page <= 1 ? "disabled" : "")">
+                <a class="page-link" role="button" @onclick="() => Go(Page - 1)"><i class="ti ti-chevron-left"></i></a>
+            </li>
+            @foreach (var p in Pages())
+            {
+                <li class="page-item @(p == Page ? "active" : "")">
+                    <a class="page-link" role="button" @onclick="() => Go(p)">@p</a>
+                </li>
+            }
+            <li class="page-item @(Page >= TotalPages ? "disabled" : "")">
+                <a class="page-link" role="button" @onclick="() => Go(Page + 1)"><i class="ti ti-chevron-right"></i></a>
+            </li>
+        </ul>
+    </div>
+}
+
+@code {
+    [Parameter] public int Page { get; set; }
+    [Parameter] public int PageSize { get; set; }
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public EventCallback<int> OnPage { get; set; }
+
+    private int TotalPages => PageSize == 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+    private int From => (Page - 1) * PageSize + 1;
+    private int To => Math.Min(Page * PageSize, TotalCount);
+
+    private IEnumerable<int> Pages()
+    {
+        var start = Math.Max(1, Page - 2);
+        var end = Math.Min(TotalPages, start + 4);
+        start = Math.Max(1, end - 4);
+        return Enumerable.Range(start, end - start + 1);
+    }
+
+    private async Task Go(int p)
+    {
+        if (p < 1 || p > TotalPages || p == Page) return;
+        await OnPage.InvokeAsync(p);
+    }
+}

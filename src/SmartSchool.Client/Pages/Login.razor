@@ -1,0 +1,150 @@
+@page "/login"
+@layout EmptyLayout
+@inject SessionService Session
+@inject ApiClient Api
+@inject AppState State
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>@L["Sign in"] · SmartSchool</PageTitle>
+
+<div class="auth-page">
+    <div class="card auth-card shadow-sm">
+        <div class="card-body p-4 p-sm-5">
+            <div class="d-flex align-items-center gap-2 mb-4">
+                <span class="brand-mark">S</span>
+                <span class="fs-3 fw-bold">SmartSchool</span>
+                <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="@L["Language"]">
+                    @foreach (var (code, name) in Localizer.Languages)
+                    {
+                        <button type="button" class="btn @(L.Language == code ? "btn-primary" : "")" @onclick="() => Localizer.ChangeAsync(JS, code)">@name</button>
+                    }
+                </div>
+            </div>
+
+            <div class="eyebrow mb-1">@L["Administration area"]</div>
+            <h1 class="h2 mb-2">@L["Sign in"]</h1>
+            <p class="text-secondary mb-4">@L["Sign in to access your administration workspace."]</p>
+
+            @if (Expired)
+            {
+                <div class="alert alert-warning py-2">@L["Your session has expired. Please sign in again."]</div>
+            }
+
+            @if (_demo.Count > 0)
+            {
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold small">@L["Quick role access"]</span>
+                    <span class="text-secondary small">@L["Development demo accounts"]</span>
+                </div>
+                <div class="row g-2 mb-4">
+                    @foreach (var d in _demo)
+                    {
+                        <div class="col-12 col-sm-6">
+                            <button type="button" class="quick-role @(_model.Email == d.Email ? "active" : "")" @onclick="() => Pick(d)">
+                                <span class="badge-initials">@d.Initials</span>
+                                <span class="d-grid">
+                                    <span class="role-name">@d.RoleName</span>
+                                    <span class="role-email">@d.Email</span>
+                                </span>
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+
+            <EditForm Model="_model" OnValidSubmit="Submit" FormName="login">
+                <DataAnnotationsValidator />
+                <div class="mb-3">
+                    <label class="form-label" for="email">@L["Email"]</label>
+                    <InputText id="email" type="email" class="form-control" placeholder="you@school.example" autocomplete="username" @bind-Value="_model.Email" />
+                    <ValidationMessage For="() => _model.Email" class="invalid-feedback d-block" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="password">@L["Password"]</label>
+                    <div class="input-group input-group-flat">
+                        <InputText id="password" type="@(_showPassword ? "text" : "password")" class="form-control" placeholder="••••••••" autocomplete="current-password" @bind-Value="_model.Password" />
+                        <span class="input-group-text">
+                            <a role="button" class="link-secondary" title="@L["Show password"]" @onclick="() => _showPassword = !_showPassword">
+                                <i class="ti @(_showPassword ? "ti-eye-off" : "ti-eye")"></i>
+                            </a>
+                        </span>
+                    </div>
+                    <ValidationMessage For="() => _model.Password" class="invalid-feedback d-block" />
+                </div>
+
+                @if (_error is not null)
+                {
+                    <div class="alert alert-danger py-2">@_error</div>
+                }
+
+                <button type="submit" class="btn btn-primary w-100" disabled="@_busy">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                    }
+                    Sign in
+                </button>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery(Name = "expired")] public int? ExpiredFlag { get; set; }
+
+    private bool Expired => ExpiredFlag == 1;
+    private readonly LoginRequest _model = new();
+    private List<DemoAccount> _demo = [];
+    private bool _busy;
+    private bool _showPassword;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (await Session.InitializeAsync())
+        {
+            Nav.NavigateTo(SafeReturnUrl());
+            return;
+        }
+        try { _demo = await Api.GetAsync<List<DemoAccount>>("api/auth/demo-accounts"); }
+        catch { _demo = []; }
+    }
+
+    private void Pick(DemoAccount d)
+    {
+        _model.Email = d.Email;
+        _model.Password = d.Password;
+        _error = null;
+    }
+
+    private async Task Submit()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Session.LoginAsync(_model);
+            Nav.NavigateTo(SafeReturnUrl());
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Friendly;
+        }
+        catch (HttpRequestException)
+        {
+            _error = L["Cannot reach the server. Check your connection and try again."];
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Only allow relative return URLs so the login page cannot redirect to another site.
+    private string SafeReturnUrl() =>
+        !string.IsNullOrEmpty(ReturnUrl) && !ReturnUrl.Contains("//") && !ReturnUrl.Contains(':') && !ReturnUrl.StartsWith("login")
+            ? ReturnUrl
+            : "";
+}

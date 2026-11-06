@@ -1,0 +1,247 @@
+@page "/tenants"
+@inherits ListPageBase<TenantDto>
+
+<PageTitle>@L["Tenants"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Platform"]</div>
+            <h1 class="page-title">@L["Tenants"]</h1>
+        </div>
+        @if (State.Can(Permissions.Tenants.Create))
+        {
+            <div class="col-auto ms-auto">
+                <button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New tenant"]</button>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3">
+        <div class="input-icon" style="max-width:320px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search name, code or email…"]" @oninput="OnSearchInput" />
+        </div>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Name"]" Column="name" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Code"]" Column="code" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Subscription"]" Column="status" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Ends"]" Column="end" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th class="text-center">@L["Schools"]</th>
+                    <th class="text-center">@L["Users"]</th>
+                    <th class="w-1"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Loading && Result is null)
+                {
+                    <tr><td colspan="7" class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>
+                }
+                else if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-secondary text-center py-4">@L["No tenants found."]</td></tr>
+                }
+                @foreach (var t in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">@t.Name</div>
+                            <div class="small text-secondary">@t.ContactEmail</div>
+                        </td>
+                        <td><code>@t.Code</code></td>
+                        <td>
+                            @if (t.PlanName is not null) { <span class="me-1">@t.PlanName</span> }
+                            <StatusBadge Status="t.SubscriptionStatus" />
+                            @if (!t.IsActive) { <span class="badge bg-secondary-lt ms-1">@L["Disabled"]</span> }
+                        </td>
+                        <td class="text-secondary">@(t.SubscriptionEndUtc?.ToLocalTime().ToString("d") ?? "—")</td>
+                        <td class="text-center">@t.SchoolCount</td>
+                        <td class="text-center">@t.UserCount</td>
+                        <td>
+                            <div class="btn-list flex-nowrap">
+                                @if (State.Can(Permissions.Tenants.Edit))
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Edit(t.Id)"><i class="ti ti-pencil"></i></button>
+                                }
+                                @if (State.Can(Permissions.Tenants.Delete))
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(t)"><i class="ti ti-trash"></i></button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New tenant"] : L["Edit tenant"])" Size="lg">
+    <ChildContent>
+    <EditForm Model="_form" OnValidSubmit="Save" id="tenant-form">
+        <DataAnnotationsValidator />
+        <div class="row g-3">
+            <div class="col-md-7">
+                <label class="form-label required">@L["Name"]</label>
+                <InputText class="form-control" @bind-Value="_form.Name" />
+                <ValidationMessage For="() => _form.Name" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-5">
+                <label class="form-label required">@L["Code"]</label>
+                <InputText class="form-control" placeholder="@L["e.g. green-valley"]" @bind-Value="_form.Code" />
+                <ValidationMessage For="() => _form.Code" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Contact email"]</label>
+                <InputText class="form-control" type="email" @bind-Value="_form.ContactEmail" />
+                <ValidationMessage For="() => _form.ContactEmail" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Phone"]</label>
+                <InputText class="form-control" @bind-Value="_form.Phone" />
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">@L["Address"]</label>
+                <InputText class="form-control" @bind-Value="_form.Address" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Country"]</label>
+                <InputText class="form-control" @bind-Value="_form.Country" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Default language"]</label>
+                <InputSelect class="form-select" @bind-Value="_form.DefaultLanguage">
+                    <option value="en">@L["English"]</option>
+                    <option value="fr">@L["Français"]</option>
+                    <option value="ar">العربية</option>
+                </InputSelect>
+            </div>
+            <div class="col-md-8 d-flex align-items-end">
+                <label class="form-check form-switch mb-2">
+                    <InputCheckbox class="form-check-input" @bind-Value="_form.IsActive" />
+                    <span class="form-check-label">@L["Tenant active"]</span>
+                </label>
+            </div>
+            @if (_editId is null)
+            {
+                <div class="col-md-8">
+                    <label class="form-label required">@L["Starting plan"]</label>
+                    <InputSelect class="form-select" @bind-Value="_form.PlanId">
+                        <option value="">@L["Select a plan…"]</option>
+                        @foreach (var p in _plans.Where(p => p.IsActive))
+                        {
+                            <option value="@p.Id">@p.Name: @p.PriceMonthly.ToString("0.##") @p.Currency / month@(p.TrialDays > 0 ? $", {p.TrialDays}-day trial" : "")</option>
+                        }
+                    </InputSelect>
+                    <div class="form-hint">@L["Plans with a trial start as a trial; others start a paid period and issue an invoice."]</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">@L["Billing cycle"]</label>
+                    <InputSelect class="form-select" @bind-Value="_form.BillingCycle">
+                        <option value="@BillingCycle.Monthly">@L["Monthly"]</option>
+                        <option value="@BillingCycle.Yearly">@L["Yearly"]</option>
+                    </InputSelect>
+                </div>
+            }
+            else
+            {
+                <div class="col-12">
+                    <div class="text-secondary small"><i class="ti ti-info-circle me-1"></i>@L["Change the plan or subscription dates from the Subscriptions page."]</div>
+                </div>
+            }
+        </div>
+        @if (_saveError is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">@_saveError</div>
+        }
+    </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="tenant-form" disabled="@_saving">
+            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+            Save
+        </button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/tenants";
+
+    private bool _editing;
+    private bool _saving;
+    private Guid? _editId;
+    private string? _saveError;
+    private TenantEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private List<PlanDto> _plans = [];
+
+    private async Task New()
+    {
+        try
+        {
+            if (_plans.Count == 0) _plans = await Api.GetAsync<List<PlanDto>>("api/plans");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); return; }
+        _editId = null;
+        _form = new TenantEditDto();
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Edit(Guid id)
+    {
+        try
+        {
+            _form = await Api.GetAsync<TenantEditDto>($"api/tenants/{id}");
+            _editId = id;
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (_editId is { } id) await Api.PutAsync($"api/tenants/{id}", _form);
+            else await Api.PostAsync<object>("api/tenants", _form);
+            _editing = false;
+            Toasts.Success(_editId is null ? "Tenant created." : "Tenant updated.");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(TenantDto t)
+    {
+        if (!await _confirm.AskAsync(L["Delete tenant?"], $"\"{t.Name}\" and its access will be disabled. Its records are kept and can be restored from the database.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/tenants/{t.Id}");
+            Toasts.Success(L["Tenant deleted."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

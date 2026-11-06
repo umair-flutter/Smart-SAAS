@@ -1,0 +1,226 @@
+@page "/invoices"
+@inherits ListPageBase<InvoiceDto>
+@inject NavigationManager Nav
+
+<PageTitle>@L["Invoices"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Billing"]</div>
+            <h1 class="page-title">@L["Invoices"]</h1>
+        </div>
+        @if (CanManage)
+        {
+            <div class="col-auto ms-auto">
+                <button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New invoice"]</button>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex flex-wrap gap-2 align-items-center">
+        <div class="input-icon" style="max-width:320px; flex:1 1 220px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search number or tenant…"]" @oninput="OnSearchInput" />
+        </div>
+        <select class="form-select" style="max-width:200px" @onchange="OnStatusFilter">
+            <option value="">@L["All statuses"]</option>
+            @foreach (var s in Enum.GetValues<InvoiceStatus>())
+            {
+                <option value="@s">@s.DisplayName()</option>
+            }
+        </select>
+        <label class="form-check form-switch mb-0">
+            <input type="checkbox" class="form-check-input" @onchange="OnOverdueFilter" />
+            <span class="form-check-label">@L["Overdue only"]</span>
+        </label>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter table-hover">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Number"]" Column="number" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    @if (ShowTenant)
+                    {
+                        <SortHeader Title="@L["Tenant"]" Column="tenant" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    }
+                    <SortHeader Title="@L["Issued"]" Column="issued" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Due"]" Column="due" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Total"]" Column="total" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Balance"]</th>
+                    <SortHeader Title="@L["Status"]" Column="status" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                </tr>
+            </thead>
+            <tbody>
+                @if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-secondary text-center py-4">@L["No invoices found."]</td></tr>
+                }
+                @foreach (var i in Result?.Items ?? [])
+                {
+                    <tr role="button" @onclick='() => Nav.NavigateTo($"invoices/{i.Id}")'>
+                        <td><a href="invoices/@i.Id" class="fw-semibold">@i.Number</a></td>
+                        @if (ShowTenant) { <td>@i.TenantName</td> }
+                        <td class="text-secondary">@Format.Date(i.IssueDateUtc)</td>
+                        <td class="@(i.IsOverdue ? "text-danger" : "text-secondary")">@Format.Date(i.DueDateUtc)</td>
+                        <td>@Format.Money(i.Total, i.Currency)</td>
+                        <td class="@(i.Balance > 0 && i.Status != InvoiceStatus.Cancelled ? "fw-semibold" : "text-secondary")">@Format.Money(i.Status == InvoiceStatus.Cancelled ? 0 : i.Balance, i.Currency)</td>
+                        <td><span class="badge @Format.InvoiceBadge(i.Status, i.IsOverdue)">@Format.InvoiceLabel(i.Status, i.IsOverdue)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_creating" Title="@L["New invoice"]" Size="xl">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label required">@L["Tenant"]</label>
+                <select class="form-select" @bind="_tenantId">
+                    <option value="">@L["Select a tenant…"]</option>
+                    @foreach (var t in State.User?.Tenants ?? [])
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">@L["Currency"]</label>
+                <input class="form-control text-uppercase" maxlength="3" @bind="_form.Currency" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">@L["Issue date"]</label>
+                <input type="date" class="form-control" @bind="_form.IssueDateUtc" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">@L["Due date"]</label>
+                <input type="date" class="form-control" @bind="_form.DueDateUtc" />
+            </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+            <table class="table table-sm table-vcenter">
+                <thead><tr><th>@L["Description"]</th><th style="width:110px">@L["Qty"]</th><th style="width:150px">@L["Unit price"]</th><th class="text-end" style="width:140px">@L["Amount"]</th><th class="w-1"></th></tr></thead>
+                <tbody>
+                    @foreach (var line in _form.Lines)
+                    {
+                        <tr>
+                            <td><input class="form-control" placeholder="@L["Service or product"]" @bind="line.Description" @bind:event="oninput" /></td>
+                            <td><input type="number" step="0.01" min="0" class="form-control" @bind="line.Quantity" @bind:event="oninput" /></td>
+                            <td><input type="number" step="0.01" min="0" class="form-control" @bind="line.UnitPrice" @bind:event="oninput" /></td>
+                            <td class="text-end">@Format.Money(Math.Round(line.Quantity * line.UnitPrice, 2), _form.Currency)</td>
+                            <td>
+                                @if (_form.Lines.Count > 1)
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Remove line"]" @onclick="() => _form.Lines.Remove(line)"><i class="ti ti-x"></i></button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <button class="btn btn-sm" @onclick="() => _form.Lines.Add(new InvoiceLineDto())"><i class="ti ti-plus me-1"></i>@L["Add line"]</button>
+
+        <div class="row g-3 mt-1">
+            <div class="col-md-7">
+                <label class="form-label">@L["Notes"]</label>
+                <textarea class="form-control" rows="3" @bind="_form.Notes"></textarea>
+            </div>
+            <div class="col-md-5">
+                <div class="mb-2 d-flex align-items-center gap-2">
+                    <label class="form-label mb-0 me-auto">@L["Tax rate (%)"]</label>
+                    <input type="number" step="0.01" min="0" max="100" class="form-control" style="max-width:110px" @bind="_form.TaxRate" @bind:event="oninput" />
+                </div>
+                <dl class="row mb-0">
+                    <dt class="col-6 fw-normal text-secondary">@L["Subtotal"]</dt><dd class="col-6 text-end">@Format.Money(Subtotal, _form.Currency)</dd>
+                    <dt class="col-6 fw-normal text-secondary">@L["Tax"]</dt><dd class="col-6 text-end">@Format.Money(Tax, _form.Currency)</dd>
+                    <dt class="col-6">@L["Total"]</dt><dd class="col-6 text-end fw-bold">@Format.Money(Subtotal + Tax, _form.Currency)</dd>
+                </dl>
+                <label class="form-check mt-2">
+                    <input type="checkbox" class="form-check-input" @bind="_form.Issue" />
+                    <span class="form-check-label">@L["Issue now (unticked saves a draft)"]</span>
+                </label>
+            </div>
+        </div>
+        @if (_error is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">@_error</div>
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _creating = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="Save">@(_form.Issue ? "Create and issue" : "Save draft")</button>
+    </Footer>
+</Modal>
+
+@code {
+    protected override string Endpoint => "api/invoices";
+    protected override string? ExtraQuery =>
+        string.Join('&', new[] { _status is null ? null : $"status={_status}", _overdue ? "overdue=true" : null }.Where(x => x is not null));
+
+    private bool CanManage => State.Can(Permissions.Billing.Manage);
+    private bool ShowTenant => State.IsSuperAdmin && State.ActiveTenantId is null;
+
+    private InvoiceStatus? _status;
+    private bool _overdue;
+    private bool _creating;
+    private bool _busy;
+    private string? _error;
+    private string _tenantId = "";
+    private InvoiceCreateDto _form = new();
+
+    private decimal Subtotal => _form.Lines.Sum(l => Math.Round(l.Quantity * l.UnitPrice, 2));
+    private decimal Tax => Math.Round(Subtotal * _form.TaxRate / 100m, 2, MidpointRounding.AwayFromZero);
+
+    private async Task OnStatusFilter(ChangeEventArgs e)
+    {
+        _status = Enum.TryParse<InvoiceStatus>(e.Value?.ToString(), out var s) ? s : null;
+        Query.Page = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnOverdueFilter(ChangeEventArgs e)
+    {
+        _overdue = e.Value is true;
+        Query.Page = 1;
+        await LoadAsync();
+    }
+
+    private void New()
+    {
+        _form = new InvoiceCreateDto();
+        _tenantId = State.ActiveTenantId?.ToString() ?? "";
+        _error = null;
+        _creating = true;
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        if (!Guid.TryParse(_tenantId, out var tid)) { _error = L["Select a tenant."]; return; }
+        if (_form.Lines.Any(l => string.IsNullOrWhiteSpace(l.Description) || l.Quantity <= 0)) { _error = L["Every line needs a description and a quantity."]; return; }
+        _form.TenantId = tid;
+        _busy = true;
+        try
+        {
+            var created = await Api.PostAsync<Dictionary<string, Guid>>("api/invoices", _form);
+            _creating = false;
+            Toasts.Success(L["Invoice created."]);
+            Nav.NavigateTo($"invoices/{created["id"]}");
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        finally { _busy = false; }
+    }
+}

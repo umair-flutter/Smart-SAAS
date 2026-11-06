@@ -1,0 +1,147 @@
+@page "/students"
+@inherits ListPageBase<StudentDto>
+@inject NavigationManager Nav
+
+<PageTitle>@L["Students"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["School"]</div>
+            <h1 class="page-title">@L["Students"]</h1>
+        </div>
+        @if (State.Can(Permissions.Students.Create) && State.ActiveSchoolId is not null)
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New student"]</button></div>
+        }
+    </div>
+</div>
+
+<SchoolHint />
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex flex-wrap gap-2">
+        <div class="input-icon" style="max-width:320px; flex:1 1 220px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search name or student no…"]" @oninput="OnSearchInput" />
+        </div>
+        <select class="form-select" style="max-width:220px" @onchange="OnClassFilter">
+            <option value="">@L["All classes"]</option>
+            @foreach (var c in _lookups?.Classes ?? [])
+            {
+                <option value="@c.Id">@c.Name</option>
+            }
+        </select>
+    </div>
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter table-hover">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Student"]" Column="name" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["No."]" Column="no" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Class"]</th>
+                    <SortHeader Title="@L["Date of birth"]" Column="dob" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Parents"]</th>
+                    <th>@L["Status"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-secondary text-center py-4">@L["No students found."]</td></tr>
+                }
+                @foreach (var s in Result?.Items ?? [])
+                {
+                    <tr role="button" @onclick='() => Nav.NavigateTo($"students/{s.Id}")'>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="avatar avatar-sm @(s.Gender == Gender.Female ? "bg-pink-lt" : "bg-azure-lt")">@Initials(s.FullName)</span>
+                                <div>
+                                    <a href="students/@s.Id" class="fw-semibold text-reset">@s.FullName</a><PersonStatus S="s.Status" />
+                                    @if (s.HasLogin) { <i class="ti ti-key text-success ms-1" title="@L["Has a sign-in account"]"></i> }
+                                </div>
+                            </div>
+                        </td>
+                        <td><code>@s.StudentNo</code></td>
+                        <td>@(s.ClassName ?? "Not enrolled")</td>
+                        <td class="text-secondary small">@s.DateOfBirth?.ToString("yyyy-MM-dd")</td>
+                        <td class="small">@string.Join(", ", s.Guardians)</td>
+                        <td>@if (s.IsActive) { <span class="badge bg-green-lt">@L["Active"]</span> } else { <span class="badge bg-secondary-lt">@L["Inactive"]</span> }</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_editing" Title="@L["New student"]" Size="lg">
+    <ChildContent>
+        <StudentForm Model="_form" Classes="_lookups?.Classes" ShowClass="true" HasLogin="false" FormId="student-form" OnValidSubmit="Save" />
+        @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="student-form" disabled="@_saving">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+@code {
+    protected override string Endpoint => "api/students";
+    protected override string? ExtraQuery => _classId is null ? null : $"classId={_classId}";
+
+    private Guid? _classId;
+    private SchoolLookupsDto? _lookups;
+    private bool _editing;
+    private bool _saving;
+    private string? _saveError;
+    private StudentEditDto _form = new();
+
+    protected override async Task OnInitializedPageAsync()
+    {
+        try { _lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups"); } catch (ApiException) { }
+    }
+
+    protected override async Task OnContextChanged()
+    {
+        _classId = null;
+        await OnInitializedPageAsync();
+        await base.OnContextChanged();
+    }
+
+    private async Task OnClassFilter(ChangeEventArgs e)
+    {
+        _classId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        Query.Page = 1;
+        await LoadAsync();
+    }
+
+    private void New()
+    {
+        _form = new StudentEditDto { ClassId = _classId };
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            var created = await Api.PostAsync<Dictionary<string, Guid>>("api/students", _form);
+            _editing = false;
+            Toasts.Success(L["Student created."]);
+            Nav.NavigateTo($"students/{created["id"]}");
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+}

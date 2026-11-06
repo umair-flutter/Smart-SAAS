@@ -1,0 +1,172 @@
+@page "/parents"
+@inherits ListPageBase<GuardianDto>
+
+<PageTitle>@L["Parents & guardians"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["School"]</div>
+            <h1 class="page-title">@L["Parents & guardians"]</h1>
+        </div>
+        @if (CanManage && State.ActiveSchoolId is not null)
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New parent / guardian"]</button></div>
+        }
+    </div>
+</div>
+
+<SchoolHint />
+
+<div class="card">
+    <div class="card-body border-bottom py-3">
+        <div class="input-icon" style="max-width:320px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search name, email or phone…"]" @oninput="OnSearchInput" />
+        </div>
+    </div>
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead><tr><SortHeader Title="@L["Name"]" Column="name" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" /><th>@L["Contact"]</th><th>@L["Occupation"]</th><th>@L["Children"]</th><th class="w-1"></th></tr></thead>
+            <tbody>
+                @if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="5" class="text-secondary text-center py-4">@L["No parents or guardians found."]</td></tr>
+                }
+                @foreach (var g in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td class="fw-semibold">@g.FullName <PersonStatus S="g.Status" /> @if (g.HasLogin) { <i class="ti ti-key text-success ms-1" title="@L["Has a sign-in account"]"></i> }</td>
+                        <td><div>@g.Phone</div><div class="small text-secondary">@g.Email</div></td>
+                        <td>@g.Occupation</td>
+                        <td class="small">@(g.Children.Count == 0 ? "—" : string.Join(", ", g.Children))</td>
+                        <td>
+                            @if (CanManage)
+                            {
+                                <div class="btn-list flex-nowrap">
+                                    <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Edit(g)"><i class="ti ti-pencil"></i></button>
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(g)"><i class="ti ti-trash"></i></button>
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New parent / guardian"] : L["Edit parent / guardian"])" Size="lg">
+    <ChildContent>
+        <EditForm Model="_form" OnValidSubmit="Save" id="guardian-form">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label required">@L["First name"]</label>
+                    <InputText class="form-control" @bind-Value="_form.FirstName" />
+                    <ValidationMessage For="() => _form.FirstName" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label required">@L["Last name"]</label>
+                    <InputText class="form-control" @bind-Value="_form.LastName" />
+                    <ValidationMessage For="() => _form.LastName" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Email"]</label>
+                    <InputText class="form-control" type="email" @bind-Value="_form.Email" />
+                    <ValidationMessage For="() => _form.Email" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Phone"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Phone" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Occupation"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Occupation" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Address"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Address" />
+                </div>
+                <StatusSelect Model="_form" Category="StatusCategory.Guardian" />
+                <LoginFields Model="_form" HasLogin="_hasLogin" RoleLabel="Parent" />
+            </div>
+            <div class="form-hint mt-2">@L["Link children from each student's page."]</div>
+            @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="guardian-form" disabled="@_saving">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/guardians";
+
+    private bool CanManage => State.Can(Permissions.Parents.Manage);
+    private bool _editing;
+    private bool _saving;
+    private bool _hasLogin;
+    private Guid? _editId;
+    private string? _saveError;
+    private GuardianEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private void New()
+    {
+        _form = new GuardianEditDto();
+        _editId = null;
+        _hasLogin = false;
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Edit(GuardianDto g)
+    {
+        try
+        {
+            _form = await Api.GetAsync<GuardianEditDto>($"api/guardians/{g.Id}");
+            _hasLogin = _form.CreateLogin;
+            _editId = g.Id;
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (_editId is { } id) await Api.PutAsync($"api/guardians/{id}", _form);
+            else await Api.PostAsync<object>("api/guardians", _form);
+            _editing = false;
+            Toasts.Success(L["Saved."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(GuardianDto g)
+    {
+        if (!await _confirm.AskAsync(L["Delete parent / guardian?"], $"{g.FullName} will be removed and unlinked from their children.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/guardians/{g.Id}");
+            Toasts.Success(L["Deleted."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

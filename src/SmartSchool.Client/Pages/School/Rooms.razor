@@ -1,0 +1,180 @@
+@page "/rooms"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@L["Rooms"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["School"]</div>
+            <h1 class="page-title">@L["Rooms"]</h1>
+        </div>
+        @if (CanManage && State.ActiveSchoolId is not null)
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New room"]</button></div>
+        }
+    </div>
+</div>
+
+<SchoolHint />
+
+<div class="card">
+    @if (_error is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@_error</div></div>
+    }
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead><tr><th>@L["Code"]</th><th>@L["Name"]</th><th>@L["Building"]</th><th>@L["Type"]</th><th class="text-center">@L["Capacity"]</th><th class="w-1"></th></tr></thead>
+            <tbody>
+                @if (_items is null)
+                {
+                    <tr><td colspan="6" class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>
+                }
+                else if (_items.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-secondary text-center py-4">@L["No rooms yet."]</td></tr>
+                }
+                @foreach (var r in _items ?? [])
+                {
+                    <tr>
+                        <td><code>@r.Code</code></td>
+                        <td class="fw-semibold">@r.Name</td>
+                        <td>@r.Building</td>
+                        <td>@r.Type</td>
+                        <td class="text-center">@r.Capacity</td>
+                        <td>
+                            @if (CanManage)
+                            {
+                                <div class="btn-list flex-nowrap">
+                                    <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Edit(r)"><i class="ti ti-pencil"></i></button>
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(r)"><i class="ti ti-trash"></i></button>
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New room"] : L["Edit room"])">
+    <ChildContent>
+        <EditForm Model="_form" OnValidSubmit="Save" id="room-form">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label required">@L["Code"]</label>
+                    <InputText class="form-control text-uppercase" @bind-Value="_form.Code" />
+                    <ValidationMessage For="() => _form.Code" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label required">@L["Name"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Name" />
+                    <ValidationMessage For="() => _form.Name" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Building"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Building" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">@L["Type"]</label>
+                    <InputSelect class="form-select" @bind-Value="_form.Type">
+                        @foreach (var t in new[] { "Classroom", "Laboratory", "Library", "Gym", "Computer lab", "Other" })
+                        {
+                            <option value="@t">@t</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">@L["Capacity"]</label>
+                    <InputNumber class="form-control" @bind-Value="_form.Capacity" />
+                </div>
+            </div>
+            @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="room-form" disabled="@_saving">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    private List<RoomDto>? _items;
+    private string? _error;
+    private bool _editing;
+    private bool _saving;
+    private Guid? _editId;
+    private string? _saveError;
+    private RoomEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private bool CanManage => State.Can(Permissions.Classes.Manage);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += Load;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        try { _items = await Api.GetAsync<List<RoomDto>>("api/rooms"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void New()
+    {
+        _form = new RoomEditDto();
+        _editId = null;
+        _saveError = null;
+        _editing = true;
+    }
+
+    private void Edit(RoomDto r)
+    {
+        _form = new RoomEditDto { Name = r.Name, Code = r.Code, Building = r.Building, Capacity = r.Capacity, Type = r.Type };
+        _editId = r.Id;
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (_editId is { } id) await Api.PutAsync($"api/rooms/{id}", _form);
+            else await Api.PostAsync<object>("api/rooms", _form);
+            _editing = false;
+            Toasts.Success(L["Room saved."]);
+            await Load();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(RoomDto r)
+    {
+        if (!await _confirm.AskAsync(L["Delete room?"], $"{r.Code} · {r.Name} will be removed.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/rooms/{r.Id}");
+            Toasts.Success(L["Room deleted."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    public void Dispose() => State.ContextChanged -= Load;
+}

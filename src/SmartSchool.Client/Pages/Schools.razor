@@ -1,0 +1,226 @@
+@page "/schools"
+@inherits ListPageBase<SchoolDto>
+
+<PageTitle>@L["Schools"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["School management"]</div>
+            <h1 class="page-title">@L["Schools"]</h1>
+        </div>
+        @if (State.Can(Permissions.Schools.Create))
+        {
+            <div class="col-auto ms-auto">
+                <button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New school"]</button>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3">
+        <div class="input-icon" style="max-width:320px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search name, code or city…"]" @oninput="OnSearchInput" />
+        </div>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["School"]" Column="name" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Code"]" Column="code" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    @if (ShowTenant)
+                    {
+                        <SortHeader Title="@L["Tenant"]" Column="tenant" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    }
+                    <SortHeader Title="@L["City"]" Column="city" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Principal"]</th>
+                    <th>@L["Status"]</th>
+                    <th class="w-1"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Loading && Result is null)
+                {
+                    <tr><td colspan="7" class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>
+                }
+                else if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-secondary text-center py-4">@L["No schools found."]</td></tr>
+                }
+                @foreach (var s in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td><div class="fw-semibold">@s.Name</div><div class="small text-secondary">@s.Email</div></td>
+                        <td><code>@s.Code</code></td>
+                        @if (ShowTenant) { <td>@s.TenantName</td> }
+                        <td>@s.City</td>
+                        <td>@s.PrincipalName</td>
+                        <td>
+                            @if (s.IsActive) { <span class="badge bg-green-lt">@L["Active"]</span> }
+                            else { <span class="badge bg-secondary-lt">@L["Inactive"]</span> }
+                        </td>
+                        <td>
+                            <div class="btn-list flex-nowrap">
+                                @if (State.Can(Permissions.Schools.Edit))
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Edit(s.Id)"><i class="ti ti-pencil"></i></button>
+                                }
+                                @if (State.Can(Permissions.Schools.Delete))
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(s)"><i class="ti ti-trash"></i></button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New school"] : L["Edit school"])" Size="lg">
+    <ChildContent>
+    <EditForm Model="_form" OnValidSubmit="Save" id="school-form">
+        <DataAnnotationsValidator />
+        <div class="row g-3">
+            @if (State.IsSuperAdmin && _editId is null)
+            {
+                <div class="col-12">
+                    <label class="form-label required">@L["Tenant"]</label>
+                    <InputSelect class="form-select" @bind-Value="_form.TenantId">
+                        <option value="">@L["Select a tenant…"]</option>
+                        @foreach (var t in State.User!.Tenants)
+                        {
+                            <option value="@t.Id">@t.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+            }
+            <div class="col-md-8">
+                <label class="form-label required">@L["Name"]</label>
+                <InputText class="form-control" @bind-Value="_form.Name" />
+                <ValidationMessage For="() => _form.Name" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label required">@L["Code"]</label>
+                <InputText class="form-control" @bind-Value="_form.Code" />
+                <ValidationMessage For="() => _form.Code" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Email"]</label>
+                <InputText class="form-control" type="email" @bind-Value="_form.Email" />
+                <ValidationMessage For="() => _form.Email" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Phone"]</label>
+                <InputText class="form-control" @bind-Value="_form.Phone" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Address"]</label>
+                <InputText class="form-control" @bind-Value="_form.Address" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["City"]</label>
+                <InputText class="form-control" @bind-Value="_form.City" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Country"]</label>
+                <InputText class="form-control" @bind-Value="_form.Country" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Principal"]</label>
+                <InputText class="form-control" @bind-Value="_form.PrincipalName" />
+            </div>
+            <div class="col-12">
+                <label class="form-check form-switch">
+                    <InputCheckbox class="form-check-input" @bind-Value="_form.IsActive" />
+                    <span class="form-check-label">@L["School active"]</span>
+                </label>
+            </div>
+        </div>
+        @if (_saveError is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">@_saveError</div>
+        }
+    </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="school-form" disabled="@_saving">
+            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+            Save
+        </button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/schools";
+
+    private bool ShowTenant => State.IsSuperAdmin && State.ActiveTenantId is null;
+    private bool _editing;
+    private bool _saving;
+    private Guid? _editId;
+    private string? _saveError;
+    private SchoolEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private void New()
+    {
+        _editId = null;
+        _form = new SchoolEditDto { TenantId = State.ActiveTenantId };
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Edit(Guid id)
+    {
+        try
+        {
+            _form = await Api.GetAsync<SchoolEditDto>($"api/schools/{id}");
+            _editId = id;
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (_editId is { } id) await Api.PutAsync($"api/schools/{id}", _form);
+            else await Api.PostAsync<object>("api/schools", _form);
+            _editing = false;
+            Toasts.Success(_editId is null ? "School created." : "School updated.");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(SchoolDto s)
+    {
+        if (!await _confirm.AskAsync(L["Delete school?"], $"\"{s.Name}\" will be removed from all lists.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/schools/{s.Id}");
+            Toasts.Success(L["School deleted."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

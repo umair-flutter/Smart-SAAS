@@ -1,0 +1,14 @@
+<span class="badge @Css">@L[Status.ToString()]</span>
+
+@code {
+    [Parameter] public SubscriptionStatus Status { get; set; }
+
+    private string Css => Status switch
+    {
+        SubscriptionStatus.Active => "bg-green-lt",
+        SubscriptionStatus.Trial => "bg-blue-lt",
+        SubscriptionStatus.Suspended => "bg-orange-lt",
+        SubscriptionStatus.Cancelled => "bg-red-lt",
+        _ => "bg-secondary-lt"
+    };
+}

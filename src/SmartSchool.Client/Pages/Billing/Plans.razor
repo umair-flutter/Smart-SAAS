@@ -1,0 +1,215 @@
+@page "/plans"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@L["Plans"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Platform"]</div>
+            <h1 class="page-title">@L["Plans"]</h1>
+        </div>
+        @if (CanManage)
+        {
+            <div class="col-auto ms-auto">
+                <button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New plan"]</button>
+            </div>
+        }
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_plans is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading plans…</div>
+}
+else
+{
+    <div class="row row-cards">
+        @foreach (var p in _plans)
+        {
+            <div class="col-md-6 col-xl-4">
+                <div class="card h-100 @(p.IsActive ? "" : "opacity-75")">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <div class="text-uppercase text-secondary fw-semibold small">@p.Code</div>
+                                <h3 class="mb-0">@p.Name</h3>
+                            </div>
+                            @if (!p.IsActive) { <span class="badge bg-secondary-lt">@L["Inactive"]</span> }
+                        </div>
+                        <div class="display-6 fw-bold my-2">@p.PriceMonthly.ToString("0.##") <span class="fs-4 text-secondary fw-normal">@p.Currency / month</span></div>
+                        <div class="text-secondary small mb-3">or @Format.Money(p.PriceYearly, p.Currency) per year</div>
+                        <p class="text-secondary">@p.Description</p>
+                        <ul class="list-unstyled mb-3">
+                            <li class="mb-1"><i class="ti ti-school text-primary me-2"></i>@(p.MaxSchools is { } s ? $"Up to {s} school(s)" : "Unlimited schools")</li>
+                            <li class="mb-1"><i class="ti ti-users text-primary me-2"></i>@(p.MaxUsers is { } u ? $"Up to {u:N0} users" : "Unlimited users")</li>
+                            <li class="mb-1"><i class="ti ti-gift text-primary me-2"></i>@(p.TrialDays > 0 ? $"{p.TrialDays}-day free trial" : "No trial")</li>
+                        </ul>
+                        <div class="mt-auto d-flex align-items-center">
+                            @if (CanManage)
+                            {
+                                <span class="text-secondary small">@p.ActiveSubscriptions active subscription(s)</span>
+                                <div class="ms-auto btn-list">
+                                    <button class="btn btn-sm" @onclick="() => Edit(p.Id)"><i class="ti ti-pencil me-1"></i>@L["Edit"]</button>
+                                    @if (p.ActiveSubscriptions == 0)
+                                    {
+                                        <button class="btn btn-sm btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(p)"><i class="ti ti-trash"></i></button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New plan"] : L["Edit plan"])" Size="lg">
+    <ChildContent>
+        <EditForm Model="_form" OnValidSubmit="Save" id="plan-form">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label required">@L["Name"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Name" />
+                    <ValidationMessage For="() => _form.Name" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label required">@L["Code"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Code" />
+                    <ValidationMessage For="() => _form.Code" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">@L["Description"]</label>
+                    <InputTextArea class="form-control" rows="2" @bind-Value="_form.Description" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label required">@L["Monthly price"]</label>
+                    <InputNumber class="form-control" @bind-Value="_form.PriceMonthly" />
+                    <ValidationMessage For="() => _form.PriceMonthly" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label required">@L["Yearly price"]</label>
+                    <InputNumber class="form-control" @bind-Value="_form.PriceYearly" />
+                    <ValidationMessage For="() => _form.PriceYearly" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label required">@L["Currency"]</label>
+                    <InputText class="form-control text-uppercase" maxlength="3" @bind-Value="_form.Currency" />
+                    <ValidationMessage For="() => _form.Currency" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">@L["Max schools"]</label>
+                    <InputNumber class="form-control" placeholder="@L["Unlimited"]" @bind-Value="_form.MaxSchools" />
+                    <ValidationMessage For="() => _form.MaxSchools" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">@L["Max users"]</label>
+                    <InputNumber class="form-control" placeholder="@L["Unlimited"]" @bind-Value="_form.MaxUsers" />
+                    <ValidationMessage For="() => _form.MaxUsers" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">@L["Trial days"]</label>
+                    <InputNumber class="form-control" @bind-Value="_form.TrialDays" />
+                    <ValidationMessage For="() => _form.TrialDays" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">@L["Display order"]</label>
+                    <InputNumber class="form-control" @bind-Value="_form.SortOrder" />
+                </div>
+                <div class="col-md-8 d-flex align-items-end">
+                    <label class="form-check form-switch mb-2">
+                        <InputCheckbox class="form-check-input" @bind-Value="_form.IsActive" />
+                        <span class="form-check-label">@L["Available for new subscriptions"]</span>
+                    </label>
+                </div>
+            </div>
+            @if (_saveError is not null)
+            {
+                <div class="alert alert-danger mt-3 mb-0">@_saveError</div>
+            }
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="plan-form" disabled="@_saving">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    private List<PlanDto>? _plans;
+    private string? _error;
+    private bool _editing;
+    private bool _saving;
+    private Guid? _editId;
+    private string? _saveError;
+    private PlanEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private bool CanManage => State.Can(Permissions.Subscriptions.Manage);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _plans = await Api.GetAsync<List<PlanDto>>("api/plans"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private void New()
+    {
+        _editId = null;
+        _form = new PlanEditDto();
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Edit(Guid id)
+    {
+        try
+        {
+            _form = await Api.GetAsync<PlanEditDto>($"api/plans/{id}");
+            _editId = id;
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (_editId is { } id) await Api.PutAsync($"api/plans/{id}", _form);
+            else await Api.PostAsync<object>("api/plans", _form);
+            _editing = false;
+            Toasts.Success(L["Plan saved."]);
+            await Load();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(PlanDto p)
+    {
+        if (!await _confirm.AskAsync(L["Delete plan?"], $"\"{p.Name}\" will be removed. Plans that were ever used can only be deactivated.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/plans/{p.Id}");
+            Toasts.Success(L["Plan deleted."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

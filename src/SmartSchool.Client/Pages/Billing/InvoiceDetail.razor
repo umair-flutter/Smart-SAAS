@@ -1,0 +1,266 @@
+@page "/invoices/{Id:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>@(_inv?.Number ?? "Invoice") · SmartSchool</PageTitle>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_inv is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading invoice…</div>
+}
+else
+{
+    <div class="page-header mb-3 d-print-none">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <a href="invoices" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Invoices"]</a>
+                <h1 class="page-title mt-1">@_inv.Number</h1>
+            </div>
+            <div class="col-auto ms-auto btn-list">
+                <button class="btn" @onclick="Print"><i class="ti ti-printer me-1"></i>@L["Print / PDF"]</button>
+                @if (CanManage)
+                {
+                    @if (_inv.Status == InvoiceStatus.Draft)
+                    {
+                        <button class="btn btn-ghost-danger" @onclick="DeleteDraft"><i class="ti ti-trash me-1"></i>@L["Delete draft"]</button>
+                        <button class="btn btn-primary" @onclick="Issue"><i class="ti ti-send me-1"></i>@L["Issue"]</button>
+                    }
+                    @if (_inv.Status.IsOpen() && _inv.AmountPaid == 0)
+                    {
+                        <button class="btn btn-ghost-danger" @onclick="Cancel"><i class="ti ti-ban me-1"></i>@L["Cancel invoice"]</button>
+                    }
+                    @if (_inv.Status.IsOpen())
+                    {
+                        <button class="btn btn-success" @onclick="OpenPayment"><i class="ti ti-cash me-1"></i>@L["Record payment"]</button>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="card card-lg">
+        <div class="card-body">
+            <div class="row mb-4">
+                <div class="col-6">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="brand-mark">S</span>
+                        <span class="fs-3 fw-bold">SmartSchool</span>
+                    </div>
+                    <div class="text-secondary">@L["School management platform"]</div>
+                </div>
+                <div class="col-6 text-end">
+                    <h2 class="mb-1">@L["INVOICE"]</h2>
+                    <div class="fw-semibold">@_inv.Number</div>
+                    <span class="badge @Format.InvoiceBadge(_inv.Status, _inv.IsOverdue) mt-1">@Format.InvoiceLabel(_inv.Status, _inv.IsOverdue)</span>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-sm-6 mb-3">
+                    <div class="text-secondary small text-uppercase fw-semibold mb-1">@L["Billed to"]</div>
+                    <div class="fw-semibold">@_inv.TenantName</div>
+                    @if (_inv.TenantAddress is not null) { <div>@_inv.TenantAddress</div> }
+                    @if (_inv.TenantCountry is not null) { <div>@_inv.TenantCountry</div> }
+                    @if (_inv.TenantEmail is not null) { <div class="text-secondary">@_inv.TenantEmail</div> }
+                </div>
+                <div class="col-sm-6 text-sm-end">
+                    <div><span class="text-secondary">@L["Issue date:"]</span> @Format.Date(_inv.IssueDateUtc)</div>
+                    <div><span class="text-secondary">@L["Due date:"]</span> <span class="@(_inv.IsOverdue ? "text-danger fw-semibold" : "")">@Format.Date(_inv.DueDateUtc)</span></div>
+                    @if (_inv.PlanName is not null) { <div><span class="text-secondary">@L["Plan:"]</span> @_inv.PlanName</div> }
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-transparent">
+                    <thead>
+                        <tr><th>@L["Description"]</th><th class="text-center" style="width:90px">@L["Qty"]</th><th class="text-end" style="width:150px">@L["Unit price"]</th><th class="text-end" style="width:150px">@L["Amount"]</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in _inv.Lines)
+                        {
+                            <tr>
+                                <td>@l.Description</td>
+                                <td class="text-center">@l.Quantity.ToString("0.##")</td>
+                                <td class="text-end">@Format.Money(l.UnitPrice, _inv.Currency)</td>
+                                <td class="text-end">@Format.Money(l.Amount, _inv.Currency)</td>
+                            </tr>
+                        }
+                        <tr><td colspan="3" class="text-end text-secondary">@L["Subtotal"]</td><td class="text-end">@Format.Money(_inv.Subtotal, _inv.Currency)</td></tr>
+                        <tr><td colspan="3" class="text-end text-secondary">Tax (@_inv.TaxRate.ToString("0.##")%)</td><td class="text-end">@Format.Money(_inv.TaxAmount, _inv.Currency)</td></tr>
+                        <tr><td colspan="3" class="text-end fw-bold">@L["Total"]</td><td class="text-end fw-bold">@Format.Money(_inv.Total, _inv.Currency)</td></tr>
+                        <tr><td colspan="3" class="text-end text-secondary">@L["Paid"]</td><td class="text-end">@Format.Money(_inv.AmountPaid, _inv.Currency)</td></tr>
+                        <tr><td colspan="3" class="text-end fw-bold">@L["Balance due"]</td><td class="text-end fw-bold fs-3">@Format.Money(_inv.Status == InvoiceStatus.Cancelled ? 0 : _inv.Balance, _inv.Currency)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_inv.Notes))
+            {
+                <p class="text-secondary mt-3 mb-0">@_inv.Notes</p>
+            }
+        </div>
+    </div>
+
+    <div class="card mt-3">
+        <div class="card-header"><h3 class="card-title">@L["Payments"]</h3></div>
+        <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+                <thead><tr><th>@L["Date"]</th><th>@L["Method"]</th><th>@L["Reference"]</th><th class="text-end">@L["Amount"]</th><th class="w-1 d-print-none"></th></tr></thead>
+                <tbody>
+                    @if (_inv.Payments.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-secondary">@L["No payments recorded."]</td></tr>
+                    }
+                    @foreach (var p in _inv.Payments)
+                    {
+                        <tr>
+                            <td>@Format.Date(p.PaidAtUtc)</td>
+                            <td>@p.Method.DisplayName()</td>
+                            <td><code>@p.Reference</code></td>
+                            <td class="text-end">@Format.Money(p.Amount, p.Currency)</td>
+                            <td class="d-print-none">
+                                @if (CanManage)
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Remove payment"]" @onclick="() => RemovePayment(p)"><i class="ti ti-trash"></i></button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<Modal @bind-Visible="_paying" Title="@L["Record payment"]">
+    <ChildContent>
+        <EditForm Model="_payment" OnValidSubmit="SavePayment" id="payment-form">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label required">Amount (@_inv?.Currency)</label>
+                    <InputNumber class="form-control" @bind-Value="_payment.Amount" />
+                    <div class="form-hint">Balance due: @(_inv is null ? "" : Format.Money(_inv.Balance, _inv.Currency))</div>
+                    <ValidationMessage For="() => _payment.Amount" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label required">@L["Payment date"]</label>
+                    <InputDate class="form-control" @bind-Value="_payment.PaidAtUtc" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Method"]</label>
+                    <InputSelect class="form-select" @bind-Value="_payment.Method">
+                        @foreach (var m in Enum.GetValues<PaymentMethod>())
+                        {
+                            <option value="@m">@m.DisplayName()</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Reference"]</label>
+                    <InputText class="form-control" placeholder="@L["Transfer or receipt number"]" @bind-Value="_payment.Reference" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">@L["Notes"]</label>
+                    <InputTextArea class="form-control" rows="2" @bind-Value="_payment.Notes" />
+                </div>
+            </div>
+            @if (_payError is not null)
+            {
+                <div class="alert alert-danger mt-3 mb-0">@_payError</div>
+            }
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _paying = false">Cancel</button>
+        <button class="btn btn-success ms-auto" type="submit" form="payment-form" disabled="@_busy">@L["Record payment"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private InvoiceDetailDto? _inv;
+    private string? _error;
+    private bool _paying;
+    private bool _busy;
+    private string? _payError;
+    private PaymentCreateDto _payment = new();
+    private ConfirmDialog _confirm = default!;
+
+    private bool CanManage => State.Can(Permissions.Billing.Manage);
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _inv = await Api.GetAsync<InvoiceDetailDto>($"api/invoices/{Id}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task Print() => await JS.InvokeVoidAsync("print");
+
+    private void OpenPayment()
+    {
+        _payment = new PaymentCreateDto { Amount = _inv!.Balance };
+        _payError = null;
+        _paying = true;
+    }
+
+    private async Task SavePayment()
+    {
+        _busy = true;
+        _payError = null;
+        try
+        {
+            await Api.PostAsync<object>($"api/invoices/{Id}/payments", _payment);
+            _paying = false;
+            Toasts.Success(L["Payment recorded."]);
+            await Load();
+        }
+        catch (ApiException ex) { _payError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task Act(string confirmTitle, string confirmText, string button, Func<Task> action, string success)
+    {
+        if (!await _confirm.AskAsync(confirmTitle, confirmText, button)) return;
+        try
+        {
+            await action();
+            Toasts.Success(success);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private Task Issue() => Act("Issue invoice?", "The invoice becomes visible to the tenant and starts its payment term.", "Issue",
+        () => Api.PostAsync($"api/invoices/{Id}/issue"), "Invoice issued.");
+
+    private Task Cancel() => Act("Cancel invoice?", "The invoice will no longer be payable. Its number stays reserved.", "Cancel invoice",
+        () => Api.PostAsync($"api/invoices/{Id}/cancel"), "Invoice cancelled.");
+
+    private async Task DeleteDraft()
+    {
+        if (!await _confirm.AskAsync(L["Delete draft?"], L["The draft invoice will be removed."])) return;
+        try
+        {
+            await Api.DeleteAsync($"api/invoices/{Id}");
+            Toasts.Success(L["Draft deleted."]);
+            Nav.NavigateTo("invoices");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private Task RemovePayment(PaymentDto p) => Act("Remove payment?", $"{Format.Money(p.Amount, p.Currency)} will be removed and the balance increased.", "Remove",
+        () => Api.DeleteAsync($"api/payments/{p.Id}"), "Payment removed.");
+}

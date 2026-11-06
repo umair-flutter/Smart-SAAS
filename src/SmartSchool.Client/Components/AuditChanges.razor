@@ -1,0 +1,47 @@
+@using System.Text.Json
+@* Shows the changed fields of an audit entry: Field: old → new *@
+@if (_changes.Count > 0)
+{
+    <div class="mt-1">
+        @foreach (var (field, oldValue, newValue) in _changes.Take(_expanded ? int.MaxValue : 4))
+        {
+            <div class="small text-secondary text-break">
+                <span class="fw-semibold text-body">@field</span>: <span class="text-decoration-line-through">@Show(oldValue)</span> → <span class="text-body">@Show(newValue)</span>
+            </div>
+        }
+        @if (_changes.Count > 4 && !_expanded)
+        {
+            <a role="button" class="small" @onclick="() => _expanded = true">@L.F("Show {0} more", _changes.Count - 4)</a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Json { get; set; }
+
+    private List<(string Field, string? Old, string? New)> _changes = [];
+    private bool _expanded;
+
+    protected override void OnParametersSet()
+    {
+        _changes = [];
+        if (string.IsNullOrWhiteSpace(Json)) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(Json);
+            foreach (var p in doc.RootElement.EnumerateObject())
+                _changes.Add((p.Name, Value(p.Value, "old"), Value(p.Value, "new")));
+        }
+        catch (JsonException) { }
+    }
+
+    private static string? Value(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) ? v.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.String => v.GetString(),
+            _ => v.GetRawText()
+        } : null;
+
+    private static string Show(string? v) => string.IsNullOrEmpty(v) ? "∅" : v.Length > 80 ? v[..80] + "…" : v;
+}

@@ -1,0 +1,143 @@
+@page "/monitoring/usage"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+
+<PageTitle>@L["Usage analytics"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Monitoring"]</div>
+            <h1 class="page-title">@L["Usage analytics"]</h1>
+        </div>
+        <div class="col-auto ms-auto">
+            <div class="btn-group" role="group" aria-label="@L["Period"]">
+                @foreach (var d in new[] { 7, 30, 90 })
+                {
+                    <button class="btn @(_days == d ? "btn-primary" : "")" @onclick="() => SetDays(d)">@L.F("{0} days", d)</button>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="alert alert-danger">@_error</div> }
+else if (_data is null) { <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>@L["Loading…"]</div> }
+else
+{
+    <div class="row row-cards mb-3">
+        <StatCard Title="@L["Page views"]" Value="_data.TotalViews" Icon="ti-eye" Color="blue" />
+        <StatCard Title="@L["Active users"]" Value="_data.ActiveUsers" Icon="ti-users" Color="green" />
+        <StatCard Title="@L["Sign-ins"]" Value="_data.Sessions" Icon="ti-login" Color="purple" />
+        <StatCard Title="@L["Views per user"]" Value="@(_data.ActiveUsers == 0 ? 0 : _data.TotalViews / _data.ActiveUsers)" Icon="ti-chart-dots" Color="orange" />
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <h3 class="card-title">@L["Page views per day"]</h3>
+            <div class="card-actions"><a role="button" class="small" @onclick="() => _table = !_table">@(_table ? L["Show chart"] : L["Show table"])</a></div>
+        </div>
+        <div class="card-body">
+            @if (_table)
+            {
+                <div class="table-responsive" style="max-height:320px">
+                    <table class="table table-sm">
+                        <thead><tr><th>@L["Date"]</th><th class="text-end">@L["Page views"]</th><th class="text-end">@L["Active users"]</th></tr></thead>
+                        <tbody>
+                            @foreach (var d in _data.Daily.AsEnumerable().Reverse())
+                            {
+                                <tr><td>@d.Date.ToString("ddd d MMM")</td><td class="text-end">@d.Views</td><td class="text-end">@d.Users</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                var max = Math.Max(1, _data.Daily.Max(d => d.Views));
+                <div class="usage-chart" role="img" aria-label="@L["Page views per day"]">
+                    <div class="usage-axis small text-secondary"><span>@max</span><span>@(max / 2)</span><span>0</span></div>
+                    <div class="usage-plot">
+                        @foreach (var d in _data.Daily)
+                        {
+                            <div class="usage-col" title="@d.Date.ToString("ddd d MMM"): @d.Views @L["views"], @d.Users @L["users"]">
+                                <div class="usage-bar" style="height:@(d.Views * 100.0 / max)%"></div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between small text-secondary mt-1 usage-dates">
+                    <span>@_data.Daily.First().Date.ToString("d MMM")</span>
+                    <span>@_data.Daily.Last().Date.ToString("d MMM")</span>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="row row-cards">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-header"><h3 class="card-title">@L["Most visited pages"]</h3></div>
+                <div class="card-body">
+                    @if (_data.TopPages.Count == 0) { <div class="text-secondary">@L["No page views yet."]</div> }
+                    @{ var topMax = Math.Max(1, _data.TopPages.Select(p => p.Views).DefaultIfEmpty(0).Max()); }
+                    @foreach (var p in _data.TopPages)
+                    {
+                        <div class="mb-2" title="@p.Views @L["views"], @p.Users @L["users"]">
+                            <div class="d-flex justify-content-between small mb-1"><code>/@p.Path</code><span class="fw-semibold">@p.Views <span class="text-secondary fw-normal">· @p.Users @L["users"]</span></span></div>
+                            <div class="usage-hbar-track"><div class="usage-hbar" style="width:@(p.Views * 100.0 / topMax)%"></div></div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header"><h3 class="card-title">@L["Usage by role"]</h3></div>
+                <div class="table-responsive">
+                    <table class="table card-table table-vcenter">
+                        <thead><tr><th>@L["Role"]</th><th class="text-end">@L["Page views"]</th><th class="text-end">@L["Users"]</th></tr></thead>
+                        <tbody>
+                            @if (_data.ByRole.Count == 0) { <tr><td colspan="3" class="text-secondary">@L["No page views yet."]</td></tr> }
+                            @foreach (var r in _data.ByRole)
+                            {
+                                <tr><td>@L[r.Role.DisplayName()]</td><td class="text-end">@r.Views</td><td class="text-end">@r.Users</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-footer small text-secondary"><a href="monitoring/sessions">@L["See user sessions"]</a></div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private int _days = 30;
+    private bool _table;
+    private UsageAnalyticsDto? _data;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += Load;
+        await Load();
+    }
+
+    private async Task SetDays(int days)
+    {
+        _days = days;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        try { _data = await Api.GetAsync<UsageAnalyticsDto>($"api/monitoring/usage?days={_days}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => State.ContextChanged -= Load;
+}

@@ -1,0 +1,111 @@
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Billing"]</div>
+    <h1 class="page-title">@L["My subscription"]</h1>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_data is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    var cur = _data.Current;
+    <div class="row row-cards">
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="text-secondary small text-uppercase fw-semibold">@L["Current plan"]</div>
+                    <h2 class="mb-1">@(_data.Plan?.Name ?? "No plan")</h2>
+                    @if (cur is not null)
+                    {
+                        <div class="mb-3">
+                            <StatusBadge Status="cur.Status" />
+                            <span class="text-secondary ms-2">@cur.BillingCycle billing</span>
+                        </div>
+                        <dl class="row mb-0">
+                            <dt class="col-6 fw-normal text-secondary">@L["Period"]</dt>
+                            <dd class="col-6">@Format.Date(cur.StartUtc) to @Format.Date(cur.EndUtc)</dd>
+                            <dt class="col-6 fw-normal text-secondary">@L["Days remaining"]</dt>
+                            <dd class="col-6">@cur.DaysRemaining</dd>
+                            <dt class="col-6 fw-normal text-secondary">@L["Price"]</dt>
+                            <dd class="col-6">@(cur.Price == 0 ? "Free (trial)" : Format.Money(cur.Price, cur.Currency))</dd>
+                            <dt class="col-6 fw-normal text-secondary">@L["Automatic renewal"]</dt>
+                            <dd class="col-6">@(cur.AutoRenew ? "On" : "Off")</dd>
+                        </dl>
+                    }
+                    @if (cur is { Status: SubscriptionStatus.Trial } && cur.DaysRemaining <= 7)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0">Your trial ends in @cur.DaysRemaining day(s). Contact the platform team to choose a paid plan.</div>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="text-secondary small text-uppercase fw-semibold mb-3">@L["Usage"]</div>
+                    <Usage Label="Schools" Used="_data.SchoolsUsed" Max="_data.Plan?.MaxSchools" />
+                    <Usage Label="Users" Used="_data.UsersUsed" Max="_data.Plan?.MaxUsers" />
+                    <div class="d-flex justify-content-between align-items-center border-top pt-3 mt-3">
+                        <span class="text-secondary">@L["Outstanding balance"]</span>
+                        <span class="fs-3 fw-bold @(_data.OutstandingBalance > 0 ? "text-danger" : "")">@Format.Money(_data.OutstandingBalance, _data.Currency)</span>
+                    </div>
+                    @if (State.Can(Permissions.Billing.View))
+                    {
+                        <a href="invoices" class="btn btn-outline-primary mt-3"><i class="ti ti-file-invoice me-1"></i>@L["View invoices"]</a>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-3">
+        <div class="card-header"><h3 class="card-title">@L["History"]</h3></div>
+        <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+                <thead><tr><th>@L["Plan"]</th><th>@L["Period"]</th><th>@L["Cycle"]</th><th>@L["Price"]</th><th>@L["Status"]</th></tr></thead>
+                <tbody>
+                    @foreach (var h in _data.History)
+                    {
+                        <tr>
+                            <td>@h.PlanName</td>
+                            <td class="text-secondary">@Format.Date(h.StartUtc) to @Format.Date(h.EndUtc)</td>
+                            <td>@h.BillingCycle</td>
+                            <td>@Format.Money(h.Price, h.Currency)</td>
+                            <td><StatusBadge Status="h.Status" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private SubscriptionOverviewDto? _data;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += Load;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        try { _data = await Api.GetAsync<SubscriptionOverviewDto>("api/subscriptions/overview"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => State.ContextChanged -= Load;
+}

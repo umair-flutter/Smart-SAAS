@@ -1,0 +1,141 @@
+@page "/"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+
+<PageTitle>@L["Dashboard"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Overview"]</div>
+            <h1 class="page-title">Welcome back, @State.User?.FullName</h1>
+        </div>
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_stats is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading dashboard…</div>
+}
+else
+{
+    <div class="row row-cards">
+        @if (State.IsSuperAdmin && State.ActiveTenantId is null)
+        {
+            <StatCard Title="@L["Tenants"]" Value="@_stats.Tenants" Sub="@($"{_stats.ActiveTenants} active or in trial")" Icon="ti-building-community" Color="blue" />
+        }
+        <StatCard Title="@L["Schools"]" Value="@_stats.Schools" Icon="ti-school" Color="green" />
+        <StatCard Title="@L["Users"]" Value="@_stats.Users" Icon="ti-users" Color="orange" />
+        <StatCard Title="@L["Active sessions"]" Value="@_stats.ActiveSessions" Icon="ti-device-desktop-analytics" Color="purple" />
+    </div>
+
+    @if (_stats.Students + _stats.Teachers + _stats.Classes > 0)
+    {
+        <div class="row row-cards mt-1">
+            <StatCard Title="@L["Students"]" Value="@_stats.Students" Sub="Active student records" Icon="ti-user-star" Color="azure" />
+            <StatCard Title="@L["Teachers"]" Value="@_stats.Teachers" Sub="Active teacher records" Icon="ti-chalkboard" Color="teal" />
+            <StatCard Title="@L["Classes"]" Value="@_stats.Classes" Sub="In the current academic year" Icon="ti-users-group" Color="indigo" />
+        </div>
+    }
+
+    @if (_stats.Billing is { } b)
+    {
+        <div class="row row-cards mt-1">
+            @foreach (var (label, value, sub, icon, color, href) in new[]
+            {
+                ("Monthly recurring revenue", Format.Money(b.MonthlyRecurringRevenue, b.Currency), "From active paid subscriptions", "ti-trending-up", "green", "subscriptions"),
+                ("Collected this month", Format.Money(b.CollectedThisMonth, b.Currency), "Recorded payments", "ti-cash", "blue", "payments"),
+                ("Outstanding", Format.Money(b.Outstanding, b.Currency), $"{Format.Money(b.Overdue, b.Currency)} overdue", "ti-file-invoice", b.Overdue > 0 ? "red" : "orange", "invoices"),
+                ("Expiring in 30 days", b.ExpiringIn30Days.ToString(), "Trials and paid periods", "ti-calendar-time", "purple", "subscriptions")
+            })
+            {
+                <div class="col-sm-6 col-lg-3">
+                    <a class="card card-sm card-link" href="@href">
+                        <div class="card-body">
+                            <div class="row align-items-center">
+                                <div class="col-auto"><span class="stat-icon bg-@(color)-lt text-@(color)"><i class="ti @icon"></i></span></div>
+                                <div class="col">
+                                    <div class="fw-medium text-secondary small">@label</div>
+                                    <div class="h3 mb-0">@value</div>
+                                    <div class="small text-secondary">@sub</div>
+                                </div>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="row row-cards mt-1">
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header"><h3 class="card-title">@L["Users by role"]</h3></div>
+                <div class="card-body">
+                    @if (_stats.UsersByRole.Count == 0)
+                    {
+                        <p class="text-secondary mb-0">@L["No users in this context yet."]</p>
+                    }
+                    @foreach (var (role, count) in _stats.UsersByRole.OrderByDescending(x => x.Value))
+                    {
+                        var pct = _stats.Users == 0 ? 0 : count * 100 / _stats.Users;
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between small mb-1"><span>@role</span><span class="fw-semibold">@count</span></div>
+                            <div class="progress progress-sm"><div class="progress-bar" style="width:@(pct)%"></div></div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-header"><h3 class="card-title">@L["Recent sign-ins"]</h3></div>
+                <div class="table-responsive">
+                    <table class="table card-table table-vcenter">
+                        <thead><tr><th>@L["User"]</th><th>@L["Role"]</th><th>@L["Last sign-in"]</th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _stats.RecentLogins)
+                            {
+                                <tr>
+                                    <td><div>@r.FullName</div><div class="small text-secondary">@r.Email</div></td>
+                                    <td>@r.RoleName</td>
+                                    <td class="text-secondary">@r.LastLoginUtc?.ToLocalTime().ToString("g")</td>
+                                </tr>
+                            }
+                            @if (_stats.RecentLogins.Count == 0)
+                            {
+                                <tr><td colspan="3" class="text-secondary">@L["No sign-ins yet."]</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private DashboardStatsDto? _stats;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += Load;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        try { _stats = await Api.GetAsync<DashboardStatsDto>("api/dashboard"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => State.ContextChanged -= Load;
+}

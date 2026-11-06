@@ -1,0 +1,409 @@
+@page "/classes/{Id:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(_c?.Name ?? "Class") · SmartSchool</PageTitle>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_c is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    <div class="page-header mb-3">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <a href="classes" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Classes"]</a>
+                <h1 class="page-title mt-1">@_c.Name <span class="badge bg-blue-lt ms-2">@_c.AcademicYearName</span></h1>
+                <div class="text-secondary small mt-1">
+                    @(_c.Level ?? "") · Homeroom: @(_c.HomeroomTeacherName ?? "none") · Room: @(_c.RoomName ?? "none")
+                </div>
+            </div>
+            <div class="col-auto ms-auto btn-list">
+                @if (State.Can(Permissions.Timetable.View))
+                {
+                    <a class="btn" href="timetable?classId=@_c.Id"><i class="ti ti-clock-hour-4 me-1"></i>@L["Timetable"]</a>
+                }
+                @if (State.Can(Permissions.Classes.Manage))
+                {
+                    <button class="btn" @onclick="OpenEdit"><i class="ti ti-pencil me-1"></i>@L["Edit"]</button>
+                    <button class="btn btn-ghost-danger" @onclick="DeleteClass"><i class="ti ti-trash me-1"></i>@L["Delete"]</button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="row row-cards">
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">@L["Students"] <span class="text-secondary ms-1">@ActiveCount / @_c.Capacity</span></h3>
+                    @if (State.Can(Permissions.Students.Edit))
+                    {
+                        <div class="card-actions"><button class="btn btn-sm btn-primary" @onclick="OpenEnroll"><i class="ti ti-user-plus me-1"></i>@L["Enrol students"]</button></div>
+                    }
+                </div>
+                <div class="table-responsive">
+                    <table class="table card-table table-vcenter">
+                        <thead><tr><th>@L["Student"]</th><th>@L["No."]</th><th>@L["Since"]</th><th>@L["Status"]</th><th class="w-1"></th></tr></thead>
+                        <tbody>
+                            @if (_c.Students.Count == 0)
+                            {
+                                <tr><td colspan="5" class="text-secondary">@L["No students enrolled yet."]</td></tr>
+                            }
+                            @foreach (var s in _c.Students)
+                            {
+                                <tr>
+                                    <td><a href="students/@s.StudentId" class="fw-semibold">@s.FullName</a></td>
+                                    <td><code>@s.StudentNo</code></td>
+                                    <td class="text-secondary small">@s.EnrolledOn.ToString("yyyy-MM-dd")</td>
+                                    <td><span class="badge @(s.Status == EnrollmentStatus.Active ? "bg-green-lt" : "bg-secondary-lt")">@s.Status</span></td>
+                                    <td>
+                                        @if (State.Can(Permissions.Students.Edit))
+                                        {
+                                            <div class="dropdown position-relative">
+                                                <button class="btn btn-sm btn-ghost-secondary" @onclick="() => _menuFor = _menuFor == s.EnrollmentId ? null : s.EnrollmentId"><i class="ti ti-dots-vertical"></i></button>
+                                                @if (_menuFor == s.EnrollmentId)
+                                                {
+                                                    <div class="dropdown-menu dropdown-menu-end show" style="position:absolute; inset-inline-end:0; top:100%">
+                                                        @foreach (var other in _otherClasses)
+                                                        {
+                                                            <a class="dropdown-item" role="button" @onclick="() => Move(s, other)"><i class="ti ti-arrow-right me-2"></i>Move to @other.Name</a>
+                                                        }
+                                                        @if (s.Status == EnrollmentStatus.Active)
+                                                        {
+                                                            <a class="dropdown-item text-warning" role="button" @onclick="() => SetStatus(s, EnrollmentStatus.Withdrawn)"><i class="ti ti-user-minus me-2"></i>@L["Mark withdrawn"]</a>
+                                                        }
+                                                        else
+                                                        {
+                                                            <a class="dropdown-item text-success" role="button" @onclick="() => SetStatus(s, EnrollmentStatus.Active)"><i class="ti ti-user-check me-2"></i>@L["Mark active"]</a>
+                                                        }
+                                                        <a class="dropdown-item text-danger" role="button" @onclick="() => Remove(s)"><i class="ti ti-x me-2"></i>@L["Remove from class"]</a>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">@L["Subjects & teachers"]</h3>
+                    @if (CanAssign)
+                    {
+                        <div class="card-actions"><button class="btn btn-sm" @onclick="() => OpenAssignment(null)"><i class="ti ti-plus me-1"></i>@L["Assign"]</button></div>
+                    }
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (_c.Assignments.Count == 0)
+                    {
+                        <div class="list-group-item text-secondary">@L["No subjects assigned yet."]</div>
+                    }
+                    @foreach (var a in _c.Assignments)
+                    {
+                        <div class="list-group-item d-flex align-items-center gap-2">
+                            <div class="flex-fill">
+                                <div class="fw-semibold">@a.SubjectName</div>
+                                <div class="small text-secondary">@a.TeacherName · @a.HoursPerWeek.ToString("0.#") h/week</div>
+                            </div>
+                            @if (CanAssign)
+                            {
+                                <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => OpenAssignment(a)"><i class="ti ti-pencil"></i></button>
+                                <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Remove"]" @onclick="() => RemoveAssignment(a)"><i class="ti ti-trash"></i></button>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (_c.Assignments.Count > 0)
+                {
+                    <div class="card-footer small text-secondary">Total: @_c.Assignments.Sum(a => a.HoursPerWeek).ToString("0.#") hours per week</div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+<Modal @bind-Visible="_editing" Title="@L["Edit class"]">
+    <ChildContent>
+        <ClassForm Model="_form" Lookups="_lookups" ShowYear="false" FormId="class-edit-form" OnValidSubmit="SaveClass" />
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="class-edit-form" disabled="@_busy">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<Modal @bind-Visible="_enrolling" Title="@($"Enrol students in {_c?.Name}")" Size="lg">
+    <ChildContent>
+        <div class="input-icon mb-3">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Filter by name or number…"]" @bind="_enrollFilter" @bind:event="oninput" />
+        </div>
+        <div class="text-secondary small mb-2">@L["Students already in another class this year are moved here."]</div>
+        <div style="max-height:380px; overflow-y:auto">
+            @foreach (var s in FilteredCandidates)
+            {
+                <label class="form-check py-1 border-bottom">
+                    <input type="checkbox" class="form-check-input" checked="@_selected.Contains(s.Id)" @onchange="e => Toggle(s.Id, e)" />
+                    <span class="form-check-label">
+                        @s.FullName <code class="ms-1">@s.StudentNo</code>
+                        <span class="text-secondary small ms-1">@(s.ClassName is null ? "Not enrolled" : $"currently in {s.ClassName}")</span>
+                    </span>
+                </label>
+            }
+            @if (!FilteredCandidates.Any()) { <div class="text-secondary">@L["No matching students."]</div> }
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <span class="text-secondary me-auto">@_selected.Count selected</span>
+        <button class="btn btn-link link-secondary" @onclick="() => _enrolling = false">Cancel</button>
+        <button class="btn btn-primary" disabled="@(_busy || _selected.Count == 0)" @onclick="SaveEnroll">@L["Enrol"]</button>
+    </Footer>
+</Modal>
+
+<Modal @bind-Visible="_assigning" Title="@(_assignmentId is null ? L["Assign subject"] : L["Edit assignment"])">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label required">@L["Subject"]</label>
+                <select class="form-select" @bind="_aSubject">
+                    <option value="">@L["Select…"]</option>
+                    @foreach (var s in _lookups?.Subjects ?? [])
+                    {
+                        <option value="@s.Id">@s.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label required">@L["Teacher"]</label>
+                <select class="form-select" @bind="_aTeacher">
+                    <option value="">@L["Select…"]</option>
+                    @foreach (var t in _lookups?.Teachers ?? [])
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@L["Hours / week"]</label>
+                <input type="number" step="0.5" min="0" class="form-control" @bind="_aHours" />
+            </div>
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _assigning = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveAssignment">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private ClassDetailDto? _c;
+    private SchoolLookupsDto? _lookups;
+    private List<LookupItem> _otherClasses = [];
+    private string? _error;
+    private string? _modalError;
+    private bool _busy;
+    private Guid? _menuFor;
+    private ConfirmDialog _confirm = default!;
+
+    private bool _editing;
+    private ClassEditDto _form = new();
+
+    private bool _enrolling;
+    private List<StudentDto> _candidates = [];
+    private HashSet<Guid> _selected = [];
+    private string _enrollFilter = "";
+
+    private bool _assigning;
+    private Guid? _assignmentId;
+    private string _aSubject = "";
+    private string _aTeacher = "";
+    private decimal _aHours = 2;
+
+    private bool CanAssign => State.Can(Permissions.Teachers.Manage);
+    private int ActiveCount => _c?.Students.Count(s => s.Status == EnrollmentStatus.Active) ?? 0;
+
+    private IEnumerable<StudentDto> FilteredCandidates => _candidates.Where(s =>
+        string.IsNullOrWhiteSpace(_enrollFilter)
+        || s.FullName.Contains(_enrollFilter, StringComparison.OrdinalIgnoreCase)
+        || s.StudentNo.Contains(_enrollFilter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Load();
+        try
+        {
+            _lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups");
+            _otherClasses = _lookups.Classes.Where(c => c.Id != Id).ToList();
+        }
+        catch (ApiException) { }
+    }
+
+    private async Task Load()
+    {
+        try { _c = await Api.GetAsync<ClassDetailDto>($"api/classes/{Id}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private void OpenEdit()
+    {
+        _form = new ClassEditDto { Name = _c!.Name, Level = _c.Level, Capacity = _c.Capacity, HomeroomTeacherId = _c.HomeroomTeacherId, RoomId = _c.RoomId, AcademicYearId = _c.AcademicYearId };
+        _modalError = null;
+        _editing = true;
+    }
+
+    private async Task SaveClass()
+    {
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PutAsync($"api/classes/{Id}", _form);
+            _editing = false;
+            Toasts.Success(L["Class updated."]);
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteClass()
+    {
+        if (!await _confirm.AskAsync(L["Delete class?"], $"{_c!.Name}, its subject assignments and timetable will be removed.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/classes/{Id}");
+            Toasts.Success(L["Class deleted."]);
+            Nav.NavigateTo("classes");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task OpenEnroll()
+    {
+        try
+        {
+            var page = await Api.GetPagedAsync<StudentDto>("api/students", new PagedQuery { PageSize = 200 });
+            var inClass = _c!.Students.Where(s => s.Status == EnrollmentStatus.Active).Select(s => s.StudentId).ToHashSet();
+            _candidates = page.Items.Where(s => s.IsActive && !inClass.Contains(s.Id)).OrderBy(s => s.ClassName is not null).ThenBy(s => s.LastName).ToList();
+            _selected = [];
+            _enrollFilter = "";
+            _modalError = null;
+            _enrolling = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private void Toggle(Guid id, ChangeEventArgs e)
+    {
+        if (e.Value is true) _selected.Add(id); else _selected.Remove(id);
+    }
+
+    private async Task SaveEnroll()
+    {
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PostAsync<object>($"api/classes/{Id}/enrollments", new EnrollStudentsDto { StudentIds = _selected.ToList() });
+            _enrolling = false;
+            Toasts.Success($"{_selected.Count} student(s) enrolled.");
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task Move(ClassStudentDto s, LookupItem target)
+    {
+        _menuFor = null;
+        try
+        {
+            await Api.PutAsync($"api/classes/enrollments/{s.EnrollmentId}", new EnrollmentStatusDto { Status = EnrollmentStatus.Active, NewClassId = target.Id });
+            Toasts.Success($"{s.FullName} moved to {target.Name}.");
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task SetStatus(ClassStudentDto s, EnrollmentStatus status)
+    {
+        _menuFor = null;
+        try
+        {
+            await Api.PutAsync($"api/classes/enrollments/{s.EnrollmentId}", new EnrollmentStatusDto { Status = status });
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Remove(ClassStudentDto s)
+    {
+        _menuFor = null;
+        if (!await _confirm.AskAsync(L["Remove from class?"], $"{s.FullName} will no longer be enrolled in {_c!.Name} this year.", L["Remove"])) return;
+        try
+        {
+            await Api.DeleteAsync($"api/classes/enrollments/{s.EnrollmentId}");
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private void OpenAssignment(AssignmentDto? a)
+    {
+        _assignmentId = a?.Id;
+        _aSubject = a?.SubjectId.ToString() ?? "";
+        _aTeacher = a?.TeacherId.ToString() ?? "";
+        _aHours = a?.HoursPerWeek ?? 2;
+        _modalError = null;
+        _assigning = true;
+    }
+
+    private async Task SaveAssignment()
+    {
+        if (!Guid.TryParse(_aSubject, out var sid) || !Guid.TryParse(_aTeacher, out var tid)) { _modalError = L["Select a subject and a teacher."]; return; }
+        var dto = new AssignmentEditDto { SubjectId = sid, TeacherId = tid, HoursPerWeek = _aHours };
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            if (_assignmentId is { } aid) await Api.PutAsync($"api/classes/{Id}/assignments/{aid}", dto);
+            else await Api.PostAsync<object>($"api/classes/{Id}/assignments", dto);
+            _assigning = false;
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveAssignment(AssignmentDto a)
+    {
+        if (!await _confirm.AskAsync(L["Remove assignment?"], $"{a.TeacherName} will no longer teach {a.SubjectName} to {_c!.Name}.", L["Remove"])) return;
+        try
+        {
+            await Api.DeleteAsync($"api/classes/{Id}/assignments/{a.Id}");
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

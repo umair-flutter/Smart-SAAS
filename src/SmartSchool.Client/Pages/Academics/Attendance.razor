@@ -1,0 +1,524 @@
+@page "/attendance"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject FileHelper Files
+
+<PageTitle>@L["Attendance"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Academics"]</div>
+    <h1 class="page-title">@L["Attendance"]</h1>
+</div>
+
+@if (IsFamily)
+{
+    <div class="mb-3"><StudentPicker Selected="_studentId" OnSelected="OnStudentSelected" /></div>
+}
+else
+{
+    <SchoolHint />
+}
+
+<ul class="nav nav-tabs mb-3">
+    @if (CanRecord)
+    {
+        <li class="nav-item"><a class="nav-link @(_tab == "sheet" ? "active" : "")" role="button" @onclick='() => SetTab("sheet")'><i class="ti ti-checklist me-1"></i>@L["Daily sheet"]</a></li>
+    }
+    <li class="nav-item"><a class="nav-link @(_tab == "absences" ? "active" : "")" role="button" @onclick='() => SetTab("absences")'><i class="ti ti-user-x me-1"></i>@L["Absences & lateness"]</a></li>
+    <li class="nav-item"><a class="nav-link @(_tab == "report" ? "active" : "")" role="button" @onclick='() => SetTab("report")'><i class="ti ti-chart-bar me-1"></i>@L["Report"]</a></li>
+    @if (State.Can(Permissions.Attendance.Validate))
+    {
+        <li class="nav-item"><a class="nav-link @(_tab == "reasons" ? "active" : "")" role="button" @onclick='() => SetTab("reasons")'><i class="ti ti-settings me-1"></i>@L["Absence reasons"]</a></li>
+    }
+</ul>
+
+@if (!IsFamily && _tab != "reasons")
+{
+    <div class="card mb-3">
+        <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+            <select class="form-select" style="max-width:220px" value="@_classId" @onchange="OnClassChanged">
+                <option value="">@(_tab == "sheet" ? "Choose a class…" : "All my classes")</option>
+                @foreach (var c in _lookups?.Classes ?? []) { <option value="@c.Id">@c.Name</option> }
+            </select>
+            @if (_tab == "sheet")
+            {
+                <input type="date" class="form-control" style="max-width:180px" value="@_date.ToString("yyyy-MM-dd")" @onchange="OnDateChanged" />
+                <div class="btn-group">
+                    <button class="btn" title="@L["Previous day"]" @onclick="() => ShiftDay(-1)"><i class="ti ti-chevron-left"></i></button>
+                    <button class="btn" @onclick="() => ShiftDay(0)">Today</button>
+                    <button class="btn" title="@L["Next day"]" @onclick="() => ShiftDay(1)"><i class="ti ti-chevron-right"></i></button>
+                </div>
+            }
+            else
+            {
+                <label class="text-secondary small">@L["From"]</label>
+                <input type="date" class="form-control" style="max-width:170px" value="@_from?.ToString("yyyy-MM-dd")" @onchange="e => OnRange(e, true)" />
+                <label class="text-secondary small">@L["to"]</label>
+                <input type="date" class="form-control" style="max-width:170px" value="@_to?.ToString("yyyy-MM-dd")" @onchange="e => OnRange(e, false)" />
+            }
+        </div>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_tab == "sheet" && CanRecord)
+{
+    @if (_classId is null)
+    {
+        <div class="empty"><p class="empty-title">@L["Choose a class to take attendance"]</p></div>
+    }
+    else if (_sheet is not null)
+    {
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">@_sheet.ClassName · @_sheet.Date.ToString("dddd d MMMM yyyy")</h3>
+                <div class="card-actions d-flex gap-2 align-items-center">
+                    @if (_sheet.IsValidated) { <span class="badge bg-green-lt"><i class="ti ti-lock me-1"></i>@L["Validated"]</span> }
+                    else if (_sheet.IsRecorded) { <span class="badge bg-yellow-lt">@L["Recorded, not validated"]</span> }
+                    else { <span class="badge bg-secondary-lt">@L["Not recorded yet"]</span> }
+                    <button class="btn btn-sm" @onclick="AllPresent" disabled="@Locked"><i class="ti ti-checks me-1"></i>@L["All present"]</button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table card-table table-vcenter">
+                    <thead><tr><th>@L["Student"]</th><th>@L["Status"]</th><th style="width:130px">@L["Arrived"]</th><th style="width:200px">@L["Reason"]</th><th>@L["Note"]</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _sheet.Rows)
+                        {
+                            <tr class="@(r.Status == AttendanceStatus.Absent ? "table-danger" : r.Status == AttendanceStatus.Late ? "table-warning" : "")">
+                                <td><div class="fw-semibold">@r.StudentName</div><div class="small text-secondary">@r.StudentNo</div></td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        @foreach (var (st, label, css) in StatusButtons)
+                                        {
+                                            <button type="button" class="btn @(r.Status == st ? css : "")" disabled="@Locked" @onclick="() => r.Status = st">@label</button>
+                                        }
+                                    </div>
+                                </td>
+                                <td>
+                                    @if (r.Status == AttendanceStatus.Late)
+                                    {
+                                        <input type="time" class="form-control form-control-sm" disabled="@Locked" @bind="r.ArrivalTime" />
+                                    }
+                                </td>
+                                <td>
+                                    @if (r.Status != AttendanceStatus.Present)
+                                    {
+                                        <select class="form-select form-select-sm" disabled="@Locked" value="@r.ReasonId" @onchange="e => r.ReasonId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
+                                            <option value="">@L["No reason yet"]</option>
+                                            @foreach (var reason in _reasons.Where(x => x.IsActive)) { <option value="@reason.Id">@reason.Name</option> }
+                                        </select>
+                                    }
+                                </td>
+                                <td>
+                                    <input class="form-control form-control-sm" placeholder="@L["Optional"]" disabled="@Locked" @bind="r.Note" />
+                                    @if (r.Document is { } d)
+                                    {
+                                        <a role="button" class="small" @onclick="() => Files.DownloadAsync(d)"><i class="ti ti-paperclip me-1"></i>@d.FileName</a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        @if (_sheet.Rows.Count == 0) { <tr><td colspan="5" class="text-secondary">@L["No students are enrolled in this class."]</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer d-flex flex-wrap gap-2 align-items-center">
+                <span class="text-secondary small me-auto">
+                    @_sheet.Rows.Count(r => r.Status == AttendanceStatus.Present) present ·
+                    @_sheet.Rows.Count(r => r.Status == AttendanceStatus.Absent) absent ·
+                    @_sheet.Rows.Count(r => r.Status == AttendanceStatus.Late) late ·
+                    @_sheet.Rows.Count(r => r.Status == AttendanceStatus.Excused) excused
+                </span>
+                @if (State.Can(Permissions.Attendance.Validate) && _sheet.IsRecorded && !_sheet.IsValidated)
+                {
+                    <button class="btn btn-success" disabled="@_busy" @onclick="Validate"><i class="ti ti-lock me-1"></i>@L["Validate day"]</button>
+                }
+                <button class="btn btn-primary" disabled="@(_busy || Locked || _sheet.Rows.Count == 0)" @onclick="SaveSheet"><i class="ti ti-device-floppy me-1"></i>@L["Save attendance"]</button>
+            </div>
+        </div>
+    }
+}
+else if (_tab == "absences")
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+                <thead><tr><th>@L["Date"]</th><th>@L["Student"]</th><th>@L["Class"]</th><th>@L["Status"]</th><th>@L["Reason"]</th><th>@L["Note / document"]</th><th class="w-1"></th></tr></thead>
+                <tbody>
+                    @if (_records?.Items.Count == 0) { <tr><td colspan="7" class="text-secondary text-center py-4">@L["No absences or late arrivals in this period."]</td></tr> }
+                    @foreach (var r in _records?.Items ?? [])
+                    {
+                        <tr>
+                            <td>@r.Date.ToString("ddd yyyy-MM-dd")</td>
+                            <td class="fw-semibold">@r.StudentName</td>
+                            <td>@r.ClassName</td>
+                            <td><AttendanceBadge Status="r.Status" /> @if (r.ArrivalTime is { } at) { <span class="small text-secondary">@at.ToString("HH:mm")</span> }</td>
+                            <td>
+                                @if (r.ReasonName is not null) { <span class="badge @(r.IsExcused ? "bg-green-lt" : "bg-red-lt")">@r.ReasonName</span> }
+                                else if (r.Status == AttendanceStatus.Absent) { <span class="badge bg-red-lt">@L["Unjustified"]</span> }
+                            </td>
+                            <td class="small">
+                                @r.Note
+                                @if (r.Document is { } d) { <div><a role="button" @onclick="() => Files.DownloadAsync(d)"><i class="ti ti-paperclip me-1"></i>@d.FileName</a></div> }
+                            </td>
+                            <td>
+                                @if (r.Status != AttendanceStatus.Present && (!IsFamily || !r.IsValidated) && (IsFamily || CanRecord))
+                                {
+                                    <button class="btn btn-sm" @onclick="() => OpenJustify(r)"><i class="ti ti-file-check me-1"></i>@L["Justify"]</button>
+                                }
+                                @if (r.IsValidated) { <i class="ti ti-lock text-secondary ms-1" title="@L["Validated by the school"]"></i> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <Pager Page="@(_records?.Page ?? 1)" PageSize="@(_records?.PageSize ?? 20)" TotalCount="@(_records?.TotalCount ?? 0)" OnPage="GoToPage" />
+    </div>
+}
+else if (_tab == "report")
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+                <thead><tr><th>@L["Student"]</th><th class="text-center">@L["Days"]</th><th class="text-center">@L["Present"]</th><th class="text-center">@L["Late"]</th><th class="text-center">@L["Absent"]</th><th class="text-center">@L["Excused"]</th><th class="text-center">@L["Unjustified"]</th><th>@L["Rate"]</th></tr></thead>
+                <tbody>
+                    @if (_summary?.Count == 0) { <tr><td colspan="8" class="text-secondary text-center py-4">@L["No attendance recorded in this period."]</td></tr> }
+                    @foreach (var s in _summary ?? [])
+                    {
+                        <tr>
+                            <td><div class="fw-semibold">@s.StudentName</div><div class="small text-secondary">@s.StudentNo</div></td>
+                            <td class="text-center">@s.DaysRecorded</td>
+                            <td class="text-center">@s.Present</td>
+                            <td class="text-center">@s.Late</td>
+                            <td class="text-center">@s.Absent</td>
+                            <td class="text-center">@s.Excused</td>
+                            <td class="text-center @(s.Unjustified > 0 ? "text-danger fw-bold" : "")">@s.Unjustified</td>
+                            <td style="min-width:140px">
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress progress-sm flex-fill"><div class="progress-bar @(s.AttendanceRate < 90 ? "bg-danger" : "bg-success")" style="width:@(s.AttendanceRate)%"></div></div>
+                                    <span class="small">@s.AttendanceRate.ToString("0.#")%</span>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+else if (_tab == "reasons")
+{
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">@L["Absence reasons"]</h3>
+            @if (State.ActiveSchoolId is not null)
+            {
+                <div class="card-actions"><button class="btn btn-sm btn-primary" @onclick="() => OpenReason(null)"><i class="ti ti-plus me-1"></i>@L["New reason"]</button></div>
+            }
+        </div>
+        <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+                <thead><tr><th>@L["Reason"]</th><th>@L["Counts as"]</th><th>@L["Document required"]</th><th>@L["Status"]</th><th class="w-1"></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _reasons)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@r.Name</td>
+                            <td><span class="badge @(r.IsExcused ? "bg-green-lt" : "bg-red-lt")">@(r.IsExcused ? "Excused" : "Unjustified")</span></td>
+                            <td>@(r.RequiresDocument ? "Yes" : "No")</td>
+                            <td>@(r.IsActive ? "Active" : "Inactive")</td>
+                            <td><button class="btn btn-sm btn-icon btn-ghost-primary" @onclick="() => OpenReason(r)"><i class="ti ti-pencil"></i></button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<Modal @bind-Visible="_justifying" Title="@L["Justify absence"]">
+    <ChildContent>
+        <div class="mb-2 text-secondary">@_justifyTarget?.StudentName · @_justifyTarget?.Date.ToString("dddd yyyy-MM-dd")</div>
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label">@L["Reason"]</label>
+                <select class="form-select" @bind="_justifyReason">
+                    <option value="">@L["Keep current"]</option>
+                    @foreach (var r in _reasons.Where(x => x.IsActive)) { <option value="@r.Id">@r.Name @(r.RequiresDocument ? "(document required)" : "")</option> }
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Note"]</label>
+                <textarea class="form-control" rows="2" @bind="_justifyNote"></textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Supporting document (PDF or photo, max 10 MB)"]</label>
+                <InputFile class="form-control" OnChange="e => _justifyFile = e.File" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" />
+            </div>
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _justifying = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveJustify">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<Modal @bind-Visible="_editingReason" Title="@(_reasonForm.Id == Guid.Empty ? L["New absence reason"] : L["Edit absence reason"])">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-12"><label class="form-label required">@L["Name"]</label><input class="form-control" @bind="_reasonForm.Name" /></div>
+            <div class="col-12">
+                <label class="form-check form-switch"><input type="checkbox" class="form-check-input" @bind="_reasonForm.IsExcused" /><span class="form-check-label">@L["Counts as excused"]</span></label>
+                <label class="form-check form-switch"><input type="checkbox" class="form-check-input" @bind="_reasonForm.RequiresDocument" /><span class="form-check-label">@L["A supporting document is expected"]</span></label>
+                <label class="form-check form-switch"><input type="checkbox" class="form-check-input" @bind="_reasonForm.IsActive" /><span class="form-check-label">@L["Active"]</span></label>
+            </div>
+        </div>
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editingReason = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveReason">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+@code {
+    private static readonly (AttendanceStatus, string, string)[] StatusButtons =
+    [
+        (AttendanceStatus.Present, "Present", "btn-success"),
+        (AttendanceStatus.Late, "Late", "btn-warning"),
+        (AttendanceStatus.Absent, "Absent", "btn-danger"),
+        (AttendanceStatus.Excused, "Excused", "btn-info")
+    ];
+
+    private string _tab = "absences";
+    private SchoolLookupsDto? _lookups;
+    private List<AbsenceReasonDto> _reasons = [];
+    private Guid? _classId;
+    private Guid? _studentId;
+    private DateOnly _date = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly? _from = DateOnly.FromDateTime(DateTime.Today.AddDays(-30));
+    private DateOnly? _to = DateOnly.FromDateTime(DateTime.Today);
+    private AttendanceSheetDto? _sheet;
+    private PagedResult<AttendanceRecordDto>? _records;
+    private List<AttendanceSummaryDto>? _summary;
+    private readonly PagedQuery _query = new();
+    private string? _error;
+    private string? _modalError;
+    private bool _busy;
+
+    private bool _justifying;
+    private AttendanceRecordDto? _justifyTarget;
+    private string _justifyReason = "";
+    private string? _justifyNote;
+    private IBrowserFile? _justifyFile;
+
+    private bool _editingReason;
+    private AbsenceReasonDto _reasonForm = new();
+
+    private bool IsFamily => State.User?.RoleType is RoleType.Parent or RoleType.Student;
+    private bool CanRecord => State.Can(Permissions.Attendance.Record);
+    private bool Locked => _sheet?.IsValidated == true && !State.Can(Permissions.Attendance.Validate);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += OnContextChanged;
+        _tab = CanRecord ? "sheet" : "absences";
+        await LoadLookups();
+        if (!IsFamily) await LoadTab();
+    }
+
+    private async Task LoadLookups()
+    {
+        try
+        {
+            _reasons = await Api.GetAsync<List<AbsenceReasonDto>>("api/attendance/reasons");
+            if (!IsFamily) _lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups");
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task OnContextChanged()
+    {
+        _classId = null;
+        await LoadLookups();
+        await LoadTab();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnStudentSelected(MyStudentDto s)
+    {
+        _studentId = s.StudentId;
+        await LoadTab();
+    }
+
+    private async Task SetTab(string tab)
+    {
+        _tab = tab;
+        await LoadTab();
+    }
+
+    private async Task LoadTab()
+    {
+        _error = null;
+        try
+        {
+            switch (_tab)
+            {
+                case "sheet":
+                    _sheet = _classId is { } cid ? await Api.GetAsync<AttendanceSheetDto>($"api/attendance/sheet?classId={cid}&date={_date:yyyy-MM-dd}") : null;
+                    break;
+                case "absences":
+                    _records = await Api.GetPagedAsync<AttendanceRecordDto>("api/attendance/records", _query, Filters(absences: true));
+                    break;
+                case "report":
+                    _summary = await Api.GetAsync<List<AttendanceSummaryDto>>($"api/attendance/summary?{Filters(absences: false)}");
+                    if (IsFamily && _studentId is { } sid) _summary = _summary.Where(s => s.StudentId == sid).ToList();
+                    break;
+                case "reasons":
+                    _reasons = await Api.GetAsync<List<AbsenceReasonDto>>("api/attendance/reasons");
+                    break;
+            }
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private string Filters(bool absences)
+    {
+        var parts = new List<string>();
+        if (_classId is { } c) parts.Add($"classId={c}");
+        if (IsFamily && _studentId is { } s) parts.Add($"studentId={s}");
+        if (_from is { } f) parts.Add($"from={f:yyyy-MM-dd}");
+        if (_to is { } t) parts.Add($"to={t:yyyy-MM-dd}");
+        if (absences) parts.Add("absencesOnly=true");
+        return string.Join('&', parts);
+    }
+
+    private async Task OnClassChanged(ChangeEventArgs e)
+    {
+        _classId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        _query.Page = 1;
+        await LoadTab();
+    }
+
+    private async Task OnDateChanged(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var d)) _date = d;
+        await LoadTab();
+    }
+
+    private async Task ShiftDay(int days)
+    {
+        _date = days == 0 ? DateOnly.FromDateTime(DateTime.Today) : _date.AddDays(days);
+        await LoadTab();
+    }
+
+    private async Task OnRange(ChangeEventArgs e, bool isFrom)
+    {
+        DateOnly? v = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null;
+        if (isFrom) _from = v; else _to = v;
+        _query.Page = 1;
+        await LoadTab();
+    }
+
+    private async Task GoToPage(int page)
+    {
+        _query.Page = page;
+        await LoadTab();
+    }
+
+    private void AllPresent()
+    {
+        foreach (var r in _sheet?.Rows ?? []) { r.Status = AttendanceStatus.Present; r.ReasonId = null; r.ArrivalTime = null; }
+    }
+
+    private async Task SaveSheet()
+    {
+        if (_sheet is null) return;
+        _busy = true;
+        try
+        {
+            await Api.PutAsync("api/attendance/sheet", new AttendanceSaveDto { ClassId = _sheet.ClassId, Date = _sheet.Date, Rows = _sheet.Rows });
+            Toasts.Success(L["Attendance saved."]);
+            await LoadTab();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    private async Task Validate()
+    {
+        if (_sheet is null) return;
+        _busy = true;
+        try
+        {
+            await Api.PostAsync($"api/attendance/sheet/validate?classId={_sheet.ClassId}&date={_sheet.Date:yyyy-MM-dd}");
+            Toasts.Success(L["Day validated. Teachers can no longer change it."]);
+            await LoadTab();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    private void OpenJustify(AttendanceRecordDto r)
+    {
+        _justifyTarget = r;
+        _justifyReason = "";
+        _justifyNote = r.Note;
+        _justifyFile = null;
+        _modalError = null;
+        _justifying = true;
+    }
+
+    private async Task SaveJustify()
+    {
+        if (_justifyTarget is null) return;
+        using var form = new MultipartFormDataContent();
+        if (Guid.TryParse(_justifyReason, out var rid)) form.Add(new StringContent(rid.ToString()), "reasonId");
+        if (_justifyNote is not null) form.Add(new StringContent(_justifyNote), "note");
+        if (!Files.TryAdd(form, _justifyFile)) return;
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PostFormAsync($"api/attendance/records/{_justifyTarget.Id}/justify", form);
+            _justifying = false;
+            Toasts.Success(L["Justification saved."]);
+            await LoadTab();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private void OpenReason(AbsenceReasonDto? r)
+    {
+        _reasonForm = r is null ? new AbsenceReasonDto() : new AbsenceReasonDto { Id = r.Id, Name = r.Name, IsExcused = r.IsExcused, RequiresDocument = r.RequiresDocument, IsActive = r.IsActive };
+        _modalError = null;
+        _editingReason = true;
+    }
+
+    private async Task SaveReason()
+    {
+        if (string.IsNullOrWhiteSpace(_reasonForm.Name)) { _modalError = L["Enter a name."]; return; }
+        _busy = true;
+        try
+        {
+            if (_reasonForm.Id == Guid.Empty) await Api.PostAsync<object>("api/attendance/reasons", _reasonForm);
+            else await Api.PutAsync($"api/attendance/reasons/{_reasonForm.Id}", _reasonForm);
+            _editingReason = false;
+            await LoadTab();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    public void Dispose() => State.ContextChanged -= OnContextChanged;
+}

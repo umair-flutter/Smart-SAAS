@@ -1,0 +1,78 @@
+@page "/monitoring/sessions"
+@inherits ListPageBase<SessionDto>
+
+<PageTitle>@L["User sessions"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Monitoring"]</div>
+    <h1 class="page-title">@L["User sessions"]</h1>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex gap-2 flex-wrap">
+        <div class="input-icon" style="max-width:320px; flex:1 1 220px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search user…"]" @oninput="OnSearchInput" />
+        </div>
+        <button class="btn ms-auto" @onclick="LoadAsync"><i class="ti ti-refresh me-1"></i>@L["Refresh"]</button>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead>
+                <tr><th>@L["User"]</th><th>@L["Tenant"]</th><th>@L["Started"]</th><th>@L["Last activity"]</th><th>@L["IP address"]</th><th>@L["Status"]</th><th class="w-1"></th></tr>
+            </thead>
+            <tbody>
+                @if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-secondary text-center py-4">@L["No sessions found."]</td></tr>
+                }
+                @foreach (var s in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td><div class="fw-semibold">@s.UserName</div><div class="small text-secondary">@s.UserEmail</div></td>
+                        <td>@(s.TenantName ?? "Platform")</td>
+                        <td class="small text-secondary">@s.CreatedAtUtc.ToLocalTime().ToString("g")</td>
+                        <td class="small text-secondary">@s.LastSeenUtc.ToLocalTime().ToString("g")</td>
+                        <td class="small"><code>@s.IpAddress</code></td>
+                        <td>
+                            @if (s.IsActive) { <span class="badge bg-green-lt">@L["Active"]</span> }
+                            else { <span class="badge bg-secondary-lt">@L["Ended"]</span> }
+                        </td>
+                        <td>
+                            @if (s.IsActive)
+                            {
+                                <button class="btn btn-sm btn-ghost-danger" @onclick="() => Revoke(s)">End</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/auth/sessions";
+    private ConfirmDialog _confirm = default!;
+
+    private async Task Revoke(SessionDto s)
+    {
+        if (!await _confirm.AskAsync(L["End session?"], $"{s.UserName} will be signed out on that device within 30 seconds.", L["End session"])) return;
+        try
+        {
+            await Api.PostAsync($"api/auth/sessions/{s.Id}/revoke");
+            Toasts.Success(L["Session ended."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

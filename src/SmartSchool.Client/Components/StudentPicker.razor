@@ -1,0 +1,41 @@
+@* For parents and students: choose which child's data to show. Hidden when there is only one. *@
+@inject ApiClient Api
+
+@if (_students.Count > 1)
+{
+    <select class="form-select" style="max-width:240px" @onchange="OnChange">
+        @foreach (var s in _students)
+        {
+            <option value="@s.StudentId" selected="@(s.StudentId == Selected)">@s.FullName (@(s.ClassName ?? "no class"))</option>
+        }
+    </select>
+}
+else if (_students.Count == 1)
+{
+    <span class="badge bg-blue-lt fs-5 py-2"><i class="ti ti-user me-1"></i>@_students[0].FullName · @_students[0].ClassName</span>
+}
+else if (_loaded)
+{
+    <span class="text-secondary">@L["No student is linked to your account."]</span>
+}
+
+@code {
+    [Parameter] public Guid? Selected { get; set; }
+    [Parameter] public EventCallback<MyStudentDto> OnSelected { get; set; }
+
+    private List<MyStudentDto> _students = [];
+    private bool _loaded;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _students = await Api.GetAsync<List<MyStudentDto>>("api/me/students"); } catch (ApiException) { }
+        _loaded = true;
+        if (_students.Count > 0 && Selected is null) await OnSelected.InvokeAsync(_students[0]);
+    }
+
+    private async Task OnChange(ChangeEventArgs e)
+    {
+        var s = _students.FirstOrDefault(x => x.StudentId.ToString() == e.Value?.ToString());
+        if (s is not null) await OnSelected.InvokeAsync(s);
+    }
+}

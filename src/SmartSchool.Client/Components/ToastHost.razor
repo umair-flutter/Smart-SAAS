@@ -1,0 +1,35 @@
+@implements IDisposable
+@inject ToastService Toasts
+
+<div class="toast-stack" aria-live="polite">
+    @foreach (var t in Toasts.Items.ToList())
+    {
+        <div class="alert @Css(t.Kind) alert-dismissible shadow-sm mb-0" role="alert">
+            <div class="d-flex gap-2 align-items-start">
+                <i class="ti @Icon(t.Kind) mt-1"></i>
+                <div>@t.Message</div>
+            </div>
+            <button type="button" class="btn-close" aria-label="@L["Close"]" @onclick="() => Toasts.Dismiss(t.Id)"></button>
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Toasts.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Toasts.Changed -= Refresh;
+
+    private static string Css(ToastKind k) => k switch
+    {
+        ToastKind.Success => "alert-success bg-white",
+        ToastKind.Error => "alert-danger bg-white",
+        _ => "alert-info bg-white"
+    };
+
+    private static string Icon(ToastKind k) => k switch
+    {
+        ToastKind.Success => "ti-circle-check text-success",
+        ToastKind.Error => "ti-alert-circle text-danger",
+        _ => "ti-info-circle text-info"
+    };
+}

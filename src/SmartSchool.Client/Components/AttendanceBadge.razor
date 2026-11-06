@@ -1,0 +1,13 @@
+<span class="badge @Css">@L[Status.ToString()]</span>
+
+@code {
+    [Parameter] public AttendanceStatus Status { get; set; }
+
+    private string Css => Status switch
+    {
+        AttendanceStatus.Present => "bg-green-lt",
+        AttendanceStatus.Late => "bg-yellow-lt",
+        AttendanceStatus.Absent => "bg-red-lt",
+        _ => "bg-azure-lt"
+    };
+}

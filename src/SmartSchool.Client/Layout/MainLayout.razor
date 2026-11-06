@@ -1,0 +1,265 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject AppState State
+@inject SessionService Session
+@inject NavigationManager Nav
+@inject ToastService Toasts
+@inject ApiClient Api
+@inject IJSRuntime JS
+
+@if (!_ready)
+{
+    <div class="boot-screen">
+        <div class="boot-card">
+            <div class="d-flex align-items-center gap-3">
+                <span class="brand-mark">S</span>
+                <div>
+                    <div class="fw-bold">SmartSchool</div>
+                    <div class="text-secondary small">@L["Checking your session"]</div>
+                </div>
+            </div>
+            <div class="boot-progress"><div class="boot-progress-bar"></div></div>
+        </div>
+    </div>
+}
+else if (State.User is { } user)
+{
+    <div class="page">
+        <aside class="navbar navbar-vertical navbar-expand-lg d-print-none" data-bs-theme="dark">
+            <div class="container-fluid">
+                <button class="navbar-toggler" type="button" aria-label="@L["Toggle navigation"]" @onclick="() => _menuOpen = !_menuOpen">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <a href="" class="navbar-brand navbar-brand-autodark d-flex align-items-center gap-2">
+                    <span class="brand-mark">S</span>
+                    <span class="fw-bold">SmartSchool</span>
+                </a>
+                <div class="collapse navbar-collapse @(_menuOpen ? "show" : "")">
+                    <ul class="navbar-nav pt-lg-2">
+                        @foreach (var section in NavItems.Sections)
+                        {
+                            var items = section.Items.Where(i => i.Permission is null || State.Can(i.Permission)).ToList();
+                            if (items.Count == 0) continue;
+                            <li class="nav-section-title">@L[section.Title]</li>
+                            @foreach (var item in items)
+                            {
+                                <li class="nav-item">
+                                    <NavLink class="nav-link" href="@item.Href" aria-label="@L[item.Title]" title="@L[item.Title]" Match="@(item.Href == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)" @onclick="() => _menuOpen = false">
+                                        <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti @item.Icon"></i></span>
+                                        <span class="nav-link-title">@L[item.Title]</span>
+                                        @if (item.Soon)
+                                        {
+                                            <i class="ti ti-clock-hour-4 nav-soon" title="@L["Coming soon"]"></i>
+                                        }
+                                    </NavLink>
+                                </li>
+                            }
+                        }
+                    </ul>
+                </div>
+            </div>
+        </aside>
+
+        <div class="page-wrapper">
+            <header class="navbar navbar-expand-md d-print-none sticky-top bg-white border-bottom">
+                <div class="container-xl gap-2 flex-wrap">
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        @if (State.IsSuperAdmin)
+                        {
+                            <select class="form-select form-select-sm context-select" title="@L["Tenant"]" @onchange="OnTenantChanged">
+                                <option value="" selected="@(State.ActiveTenantId is null)">@L["All tenants"]</option>
+                                @foreach (var t in user.Tenants)
+                                {
+                                    <option value="@t.Id" selected="@(State.ActiveTenantId == t.Id)">@t.Name</option>
+                                }
+                            </select>
+                        }
+                        else if (user.TenantName is not null)
+                        {
+                            <span class="badge bg-blue-lt"><i class="ti ti-building me-1"></i>@user.TenantName</span>
+                        }
+
+                        @if (user.Schools.Count > 0)
+                        {
+                            <select class="form-select form-select-sm context-select" title="@L["School"]" @onchange="OnSchoolChanged">
+                                @if (!user.RoleType.IsSchoolScoped())
+                                {
+                                    <option value="" selected="@(State.ActiveSchoolId is null)">@L["All schools"]</option>
+                                }
+                                @foreach (var s in user.Schools)
+                                {
+                                    <option value="@s.Id" selected="@(State.ActiveSchoolId == s.Id)">@s.Name</option>
+                                }
+                            </select>
+                        }
+
+                        @if (State.ActiveSchoolId is not null && _years.Count > 0)
+                        {
+                            <select class="form-select form-select-sm context-select" title="@L["Academic year"]" @onchange="OnYearChanged">
+                                @foreach (var y in _years)
+                                {
+                                    <option value="@y.Id" selected="@((State.ActiveYearId ?? _currentYearId) == y.Id)">@y.Name</option>
+                                }
+                            </select>
+                        }
+                    </div>
+
+                    <div class="navbar-nav flex-row ms-auto align-items-center gap-1">
+                        <NotificationBell />
+                        <div class="nav-item dropdown">
+                            <a class="nav-link d-flex lh-1 text-reset p-0" role="button" @onclick="() => _userMenuOpen = !_userMenuOpen">
+                                <span class="avatar avatar-sm bg-primary-lt">@Initials(user.FullName)</span>
+                                <div class="d-none d-xl-block ps-2">
+                                    <div>@user.FullName</div>
+                                    <div class="mt-1 small text-secondary">@user.RoleType.DisplayName()</div>
+                                </div>
+                            </a>
+                            @if (_userMenuOpen)
+                            {
+                                <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow show" style="position:absolute; inset-inline-end:0; top:100%">
+                                    <span class="dropdown-header">@user.Email</span>
+                                    <a class="dropdown-item" href="profile" @onclick="() => _userMenuOpen = false"><i class="ti ti-user-circle me-2"></i>@L["My profile"]</a>
+                                    <a class="dropdown-item" href="notifications" @onclick="() => _userMenuOpen = false"><i class="ti ti-bell me-2"></i>@L["Notifications"]</a>
+                                    <div class="dropdown-divider"></div>
+                                    <span class="dropdown-header">@L["Language"]</span>
+                                    @foreach (var (code, name) in Localizer.Languages)
+                                    {
+                                        <a class="dropdown-item @(L.Language == code ? "active" : "")" role="button" @onclick="() => ChangeLanguage(code)"><i class="ti ti-language me-2"></i>@name</a>
+                                    }
+                                    <div class="dropdown-divider"></div>
+                                    <a class="dropdown-item text-danger" role="button" @onclick="Logout"><i class="ti ti-logout me-2"></i>@L["Sign out"]</a>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="page-body">
+                <div class="container-xl">
+                    @Body
+                </div>
+            </div>
+
+            <footer class="footer footer-transparent d-print-none">
+                <div class="container-xl text-secondary small">SmartSchool SaaS · @L["Multi-tenant school management"]</div>
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _ready;
+    private bool _menuOpen;
+    private bool _userMenuOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.UserChanged += OnUserChanged;
+        if (!await Session.InitializeAsync())
+        {
+            var returnUrl = Nav.ToBaseRelativePath(Nav.Uri);
+            Nav.NavigateTo(string.IsNullOrEmpty(returnUrl) ? "login" : $"login?returnUrl={Uri.EscapeDataString(returnUrl)}");
+            return;
+        }
+        _ready = true;
+
+        // The language saved on the account wins at sign-in (it reloads the page once when it differs).
+        if (State.User is { } u && u.Language != L.Language && u.Language is "en" or "fr" or "ar")
+        {
+            await Localizer.ChangeAsync(JS, u.Language);
+            return;
+        }
+
+        Nav.LocationChanged += OnLocationChanged;
+        TrackPageView(Nav.Uri);
+        await LoadYears();
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => TrackPageView(e.Location);
+
+    /// <summary>Fire-and-forget page view for usage analytics.</summary>
+    private void TrackPageView(string uri)
+    {
+        var path = Nav.ToBaseRelativePath(uri);
+        _ = Task.Run(async () => { try { await Api.PostAsync("api/monitoring/page-view", new PageViewDto(path)); } catch { } });
+    }
+
+    private async Task ChangeLanguage(string code)
+    {
+        _userMenuOpen = false;
+        if (State.User is { } u)
+        {
+            var parts = u.FullName.Split(' ', 2);
+            try { await Api.PutAsync<CurrentUserDto>("api/me/profile", new ProfileUpdateDto { FirstName = parts[0], LastName = parts.ElementAtOrDefault(1) ?? parts[0], Language = code }); }
+            catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        }
+        await Localizer.ChangeAsync(JS, code);
+    }
+
+    private List<LookupItem> _years = [];
+    private Guid? _currentYearId;
+
+    /// <summary>Academic years of the selected school for the top-bar switcher.</summary>
+    private async Task LoadYears()
+    {
+        _years = [];
+        _currentYearId = null;
+        if (State.ActiveSchoolId is null) return;
+        try
+        {
+            var lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups");
+            _years = lookups.Years;
+            _currentYearId = lookups.AcademicYearId;
+        }
+        catch (ApiException) { /* the switcher is optional */ }
+        StateHasChanged();
+    }
+
+    private async Task OnYearChanged(ChangeEventArgs e)
+    {
+        Guid? id = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        await State.ChangeYearAsync(id == _currentYearId ? null : id);
+    }
+
+    private void OnUserChanged()
+    {
+        if (State.User is null && _ready)
+        {
+            _ready = false;
+            Nav.NavigateTo("login");
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnTenantChanged(ChangeEventArgs e)
+    {
+        Guid? id = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        await State.ChangeTenantAsync(id);
+        try { await Session.RefreshUserAsync(); }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        await LoadYears();
+    }
+
+    private async Task OnSchoolChanged(ChangeEventArgs e)
+    {
+        Guid? id = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        await State.ChangeSchoolAsync(id);
+        await LoadYears();
+    }
+
+    private async Task Logout()
+    {
+        _userMenuOpen = false;
+        await Session.LogoutAsync();
+    }
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+
+    public void Dispose()
+    {
+        State.UserChanged -= OnUserChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

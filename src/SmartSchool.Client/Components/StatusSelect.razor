@@ -1,0 +1,24 @@
+@inject ApiClient Api
+
+@if (_options.Count > 0)
+{
+    <div class="col-md-6">
+        <label class="form-label">@L["Status"]</label>
+        <select class="form-select" value="@Model.StatusOptionId" @onchange="e => Model.StatusOptionId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
+            <option value="">@L["None"]</option>
+            @foreach (var o in _options.Where(o => o.IsActive || o.Id == Model.StatusOptionId)) { <option value="@o.Id">@o.Name</option> }
+        </select>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public PersonEditDto Model { get; set; } = default!;
+    [Parameter] public StatusCategory Category { get; set; }
+
+    private List<StatusOptionDto> _options = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _options = await Api.GetAsync<List<StatusOptionDto>>($"api/status-options?category={Category}"); } catch (ApiException) { }
+    }
+}

@@ -1,0 +1,27 @@
+<div class="col-sm-6 col-lg-3">
+    <div class="card card-sm">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <span class="stat-icon bg-@(Color)-lt text-@(Color)"><i class="ti @Icon"></i></span>
+                </div>
+                <div class="col">
+                    <div class="fw-medium text-secondary small">@Title</div>
+                    <div class="h2 mb-0">@Value</div>
+                    @if (Sub is not null)
+                    {
+                        <div class="small text-secondary">@Sub</div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public int Value { get; set; }
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public string Icon { get; set; } = "ti-chart-bar";
+    [Parameter] public string Color { get; set; } = "blue";
+}

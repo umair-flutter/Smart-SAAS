@@ -1,0 +1,55 @@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" id="@FormId">
+    <DataAnnotationsValidator />
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label required">@L["Class"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.ClassId">
+                <option value="">@L["Select…"]</option>
+                @foreach (var c in Lookups?.Classes ?? []) { <option value="@c.Id">@c.Name</option> }
+            </InputSelect>
+            <ValidationMessage For="() => Model.ClassId" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label required">@L["Subject"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.SubjectId">
+                <option value="">@L["Select…"]</option>
+                @foreach (var s in Lookups?.Subjects ?? []) { <option value="@s.Id">@s.Name</option> }
+            </InputSelect>
+            <ValidationMessage For="() => Model.SubjectId" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-12">
+            <label class="form-label required">@L["Title"]</label>
+            <InputText class="form-control" @bind-Value="Model.Title" />
+            <ValidationMessage For="() => Model.Title" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-12">
+            <label class="form-label">@L["Instructions"]</label>
+            <InputTextArea class="form-control" rows="4" @bind-Value="Model.Instructions" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">@L["Due"]</label>
+            <input type="datetime-local" class="form-control" value="@Model.DueAtUtc.ToLocalTime().ToString("yyyy-MM-ddTHH:mm")" @onchange="OnDue" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">@L["Marked out of"]</label>
+            <InputNumber class="form-control" placeholder="@L["Not marked"]" @bind-Value="Model.MaxScore" />
+        </div>
+        <div class="col-12">
+            <label class="form-check form-switch"><InputCheckbox class="form-check-input" @bind-Value="Model.AllowLateSubmission" /><span class="form-check-label">@L["Accept late hand-ins (flagged as late)"]</span></label>
+            <label class="form-check form-switch"><InputCheckbox class="form-check-input" @bind-Value="Model.IsPublished" /><span class="form-check-label">@L["Published (visible to students and parents)"]</span></label>
+        </div>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public HomeworkEditDto Model { get; set; } = default!;
+    [Parameter] public SchoolLookupsDto? Lookups { get; set; }
+    [Parameter] public string FormId { get; set; } = "hw-form";
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+
+    private void OnDue(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var local))
+            Model.DueAtUtc = DateTime.SpecifyKind(local, DateTimeKind.Local).ToUniversalTime();
+    }
+}

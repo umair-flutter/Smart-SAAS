@@ -1,0 +1,320 @@
+@page "/users"
+@inherits ListPageBase<UserDto>
+
+<PageTitle>@L["Users"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Platform"]</div>
+            <h1 class="page-title">@L["Users"]</h1>
+        </div>
+        @if (State.Can(Permissions.Users.Create))
+        {
+            <div class="col-auto ms-auto">
+                <button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New user"]</button>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex flex-wrap gap-2">
+        <div class="input-icon" style="max-width:320px; flex:1 1 220px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search name or email…"]" @oninput="OnSearchInput" />
+        </div>
+        <select class="form-select" style="max-width:220px" @onchange="OnRoleFilter">
+            <option value="">@L["All roles"]</option>
+            @foreach (var r in Enum.GetValues<RoleType>())
+            {
+                <option value="@r">@r.DisplayName()</option>
+            }
+        </select>
+    </div>
+
+    @if (LoadError is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div>
+    }
+
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Name"]" Column="name" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <SortHeader Title="@L["Role"]" Column="role" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    @if (State.IsSuperAdmin && State.ActiveTenantId is null)
+                    {
+                        <SortHeader Title="@L["Tenant"]" Column="tenant" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    }
+                    <th>@L["Schools"]</th>
+                    <SortHeader Title="@L["Last sign-in"]" Column="lastlogin" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Status"]</th>
+                    <th class="w-1"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Loading && Result is null)
+                {
+                    <tr><td colspan="7" class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>
+                }
+                else if (Result?.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="text-secondary text-center py-4">@L["No users found."]</td></tr>
+                }
+                @foreach (var u in Result?.Items ?? [])
+                {
+                    <tr>
+                        <td><div class="fw-semibold">@u.FullName</div><div class="small text-secondary">@u.Email</div></td>
+                        <td><span class="badge bg-azure-lt">@u.RoleName</span></td>
+                        @if (State.IsSuperAdmin && State.ActiveTenantId is null) { <td>@(u.TenantName ?? "Platform")</td> }
+                        <td class="small">@(u.SchoolNames.Count == 0 ? "All" : string.Join(", ", u.SchoolNames))</td>
+                        <td class="text-secondary small">@(u.LastLoginUtc?.ToLocalTime().ToString("g") ?? "Never")</td>
+                        <td>
+                            @if (u.IsActive) { <span class="badge bg-green-lt">@L["Active"]</span> }
+                            else { <span class="badge bg-secondary-lt">@L["Disabled"]</span> }
+                        </td>
+                        <td>
+                            <div class="btn-list flex-nowrap">
+                                @if (State.Can(Permissions.Users.Edit))
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Edit(u.Id)"><i class="ti ti-pencil"></i></button>
+                                }
+                                @if (State.Can(Permissions.Users.Delete) && u.Id != State.User?.Id)
+                                {
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(u)"><i class="ti ti-trash"></i></button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New user"] : L["Edit user"])" Size="lg">
+    <ChildContent>
+    <EditForm Model="_form" OnValidSubmit="Save" id="user-form">
+        <DataAnnotationsValidator />
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label required">@L["First name"]</label>
+                <InputText class="form-control" @bind-Value="_form.FirstName" />
+                <ValidationMessage For="() => _form.FirstName" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label required">@L["Last name"]</label>
+                <InputText class="form-control" @bind-Value="_form.LastName" />
+                <ValidationMessage For="() => _form.LastName" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label required">@L["Email"]</label>
+                <InputText class="form-control" type="email" @bind-Value="_form.Email" />
+                <ValidationMessage For="() => _form.Email" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Phone"]</label>
+                <InputText class="form-control" @bind-Value="_form.Phone" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label required">@L["Role"]</label>
+                <select class="form-select" value="@_form.RoleId" @onchange="OnRoleSelected">
+                    <option value="@Guid.Empty">@L["Select a role…"]</option>
+                    @foreach (var r in _roles)
+                    {
+                        <option value="@r.Id">@r.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Language"]</label>
+                <InputSelect class="form-select" @bind-Value="_form.PreferredLanguage">
+                    <option value="en">@L["English"]</option>
+                    <option value="fr">@L["Français"]</option>
+                    <option value="ar">العربية</option>
+                </InputSelect>
+            </div>
+
+            @if (State.IsSuperAdmin && _editId is null && SelectedRole is { Type: not RoleType.SuperAdmin })
+            {
+                <div class="col-12">
+                    <label class="form-label required">@L["Tenant"]</label>
+                    <select class="form-select" value="@_form.TenantId" @onchange="OnTenantSelected">
+                        <option value="">@L["Select a tenant…"]</option>
+                        @foreach (var t in State.User!.Tenants)
+                        {
+                            <option value="@t.Id">@t.Name</option>
+                        }
+                    </select>
+                </div>
+            }
+
+            @if (SelectedRole?.Type.IsSchoolScoped() == true)
+            {
+                <div class="col-12">
+                    <label class="form-label required">@L["Schools"]</label>
+                    @if (_schools.Count == 0)
+                    {
+                        <div class="text-secondary small">@L["No schools available. Select a tenant first."]</div>
+                    }
+                    <div class="row g-2">
+                        @foreach (var s in _schools)
+                        {
+                            <div class="col-sm-6">
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" checked="@_form.SchoolIds.Contains(s.Id)" @onchange="e => ToggleSchool(s.Id, e)" />
+                                    <span class="form-check-label">@s.Name</span>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="col-md-6">
+                <label class="form-label @(_editId is null ? "required" : "")">@L["Password"]</label>
+                <InputText class="form-control" type="password" autocomplete="new-password"
+                           placeholder="@(_editId is null ? "At least 8 characters" : "Leave empty to keep current")" @bind-Value="_form.Password" />
+                <ValidationMessage For="() => _form.Password" class="invalid-feedback d-block" />
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <label class="form-check form-switch mb-2">
+                    <InputCheckbox class="form-check-input" @bind-Value="_form.IsActive" />
+                    <span class="form-check-label">@L["Account active"]</span>
+                </label>
+            </div>
+        </div>
+        @if (_saveError is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">@_saveError</div>
+        }
+    </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="user-form" disabled="@_saving">
+            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+            Save
+        </button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/users";
+    protected override string? ExtraQuery => _roleFilter is null ? null : $"role={_roleFilter}";
+
+    private RoleType? _roleFilter;
+    private bool _editing;
+    private bool _saving;
+    private Guid? _editId;
+    private string? _saveError;
+    private UserEditDto _form = new();
+    private List<RoleDto> _roles = [];
+    private List<LookupItem> _schools = [];
+    private ConfirmDialog _confirm = default!;
+
+    private RoleDto? SelectedRole => _roles.FirstOrDefault(r => r.Id == _form.RoleId);
+
+    private async Task OnRoleFilter(ChangeEventArgs e)
+    {
+        _roleFilter = Enum.TryParse<RoleType>(e.Value?.ToString(), out var r) ? r : null;
+        Query.Page = 1;
+        await LoadAsync();
+    }
+
+    private async Task EnsureRoles()
+    {
+        if (_roles.Count == 0) _roles = await Api.GetAsync<List<RoleDto>>("api/roles/assignable");
+    }
+
+    private async Task LoadSchools(Guid? tenantId)
+    {
+        _schools = tenantId is null && State.IsSuperAdmin
+            ? []
+            : await Api.GetAsync<List<LookupItem>>($"api/schools/lookup{(tenantId is null ? "" : $"?tenantId={tenantId}")}");
+    }
+
+    private async Task New()
+    {
+        try
+        {
+            await EnsureRoles();
+            _editId = null;
+            _form = new UserEditDto { TenantId = State.ActiveTenantId };
+            if (State.ActiveSchoolId is { } sid) _form.SchoolIds.Add(sid);
+            await LoadSchools(_form.TenantId ?? State.User?.TenantId);
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Edit(Guid id)
+    {
+        try
+        {
+            await EnsureRoles();
+            _form = await Api.GetAsync<UserEditDto>($"api/users/{id}");
+            _editId = id;
+            await LoadSchools(_form.TenantId);
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private void OnRoleSelected(ChangeEventArgs e) =>
+        _form.RoleId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : Guid.Empty;
+
+    private async Task OnTenantSelected(ChangeEventArgs e)
+    {
+        _form.TenantId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        _form.SchoolIds.Clear();
+        await LoadSchools(_form.TenantId);
+    }
+
+    private void ToggleSchool(Guid id, ChangeEventArgs e)
+    {
+        if (e.Value is true) { if (!_form.SchoolIds.Contains(id)) _form.SchoolIds.Add(id); }
+        else _form.SchoolIds.Remove(id);
+    }
+
+    private async Task Save()
+    {
+        if (_form.RoleId == Guid.Empty)
+        {
+            _saveError = L["Select a role."];
+            return;
+        }
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_form.Password)) _form.Password = null;
+            if (_editId is { } id) await Api.PutAsync($"api/users/{id}", _form);
+            else await Api.PostAsync<object>("api/users", _form);
+            _editing = false;
+            Toasts.Success(_editId is null ? "User created." : "User updated.");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(UserDto u)
+    {
+        if (!await _confirm.AskAsync(L["Delete user?"], $"{u.FullName} will no longer be able to sign in.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/users/{u.Id}");
+            Toasts.Success(L["User deleted."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

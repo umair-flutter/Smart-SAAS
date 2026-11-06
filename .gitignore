@@ -1,0 +1,29 @@
+# Build output
+bin/
+obj/
+publish/
+TestResults/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Claude Code local settings (keep the dev-server launch file)
+.claude/*
+!.claude/launch.json
+
+# Runtime data written by the app
+**/logs/
+**/App_Data/
+
+# Real secrets: use appsettings.Production.example.json as the template
+**/appsettings.Production.json
+**/appsettings.Staging.json
+*.env
+
+# Old default template from before the rebuild (not part of SmartSchool)
+/SmartSchool SaaS Core Management System/
+/SmartSchool SaaS Core Management System.slnx

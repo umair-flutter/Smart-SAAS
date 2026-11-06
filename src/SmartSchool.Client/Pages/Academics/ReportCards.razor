@@ -1,0 +1,178 @@
+@page "/report-cards"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@L["Report cards"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Academics"]</div>
+    <h1 class="page-title">@L["Report cards"]</h1>
+</div>
+
+@if (IsFamily)
+{
+    <div class="card mb-3">
+        <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+            <StudentPicker Selected="_studentId" OnSelected="s => _studentId = s.StudentId" />
+        </div>
+    </div>
+    @if (_studentId is { } sid)
+    {
+        <div class="row row-cards">
+            @foreach (var t in _familyTerms)
+            {
+                <div class="col-sm-4">
+                    <a class="card card-link" href="report-cards/@sid?termId=@t.Id">
+                        <div class="card-body text-center">
+                            <i class="ti ti-report fs-1 text-primary"></i>
+                            <div class="h3 mt-2 mb-0">@t.Name</div>
+                            <div class="text-secondary small">@L["Open report card"]</div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+        <p class="text-secondary small mt-2">@L["Report cards appear once the school publishes them."]</p>
+    }
+}
+else
+{
+    <SchoolHint />
+    <div class="card mb-3">
+        <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+            <select class="form-select" style="max-width:220px" value="@_classId" @onchange="OnClass">
+                <option value="">@L["Choose a class…"]</option>
+                @foreach (var c in _lookups?.Classes ?? []) { <option value="@c.Id">@c.Name</option> }
+            </select>
+            <select class="form-select" style="max-width:180px" value="@_termId" @onchange="OnTerm">
+                @foreach (var t in _lookups?.Terms ?? []) { <option value="@t.Id">@t.Name</option> }
+            </select>
+            @if (CanPublish && _rows is { Count: > 0 })
+            {
+                var published = _rows.All(r => r.Status == ReportCardStatus.Published);
+                <button class="btn ms-auto @(published ? "" : "btn-success")" disabled="@_busy" @onclick="() => Publish(!published)">
+                    <i class="ti @(published ? "ti-eye-off" : "ti-send") me-1"></i>@(published ? "Withdraw publication" : "Publish to families")
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (_error is not null) { <div class="alert alert-danger">@_error</div> }
+
+    @if (_classId is null)
+    {
+        <div class="empty"><p class="empty-title">@L["Choose a class to see its report cards"]</p></div>
+    }
+    else if (_rows is null)
+    {
+        <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Computing averages…</div>
+    }
+    else
+    {
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table card-table table-vcenter table-hover">
+                    <thead><tr><th class="w-1">@L["Rank"]</th><th>@L["Student"]</th><th>@L["Average /20"]</th><th class="text-center">@L["Days absent"]</th><th>@L["General comment"]</th><th>@L["Status"]</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _rows)
+                        {
+                            <tr role="button" @onclick='() => Nav.NavigateTo($"report-cards/{r.StudentId}?termId={_termId}")'>
+                                <td class="fw-bold">@(r.Rank?.ToString() ?? "—")</td>
+                                <td><div class="fw-semibold">@r.StudentName</div><div class="small text-secondary">@r.StudentNo</div></td>
+                                <td>
+                                    @if (r.Average is { } a)
+                                    {
+                                        <span class="fw-bold @(a < 10 ? "text-danger" : "")">@a.ToString("0.00")</span>
+                                        <div class="progress progress-sm mt-1" style="max-width:140px"><div class="progress-bar @(a < 10 ? "bg-danger" : a >= 14 ? "bg-success" : "")" style="width:@(a * 5)%"></div></div>
+                                    }
+                                    else { <span class="text-secondary">@L["No results"]</span> }
+                                </td>
+                                <td class="text-center">@r.Absences</td>
+                                <td>@(r.HasGeneralComment ? "✓" : "")</td>
+                                <td><span class="badge @(r.Status == ReportCardStatus.Published ? "bg-green-lt" : "bg-secondary-lt")">@r.Status</span></td>
+                            </tr>
+                        }
+                        @if (_rows.Count == 0) { <tr><td colspan="6" class="text-secondary">@L["No students in this class."]</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    private SchoolLookupsDto? _lookups;
+    private List<LookupItem> _familyTerms = [];
+    private List<ReportCardSummaryDto>? _rows;
+    private Guid? _classId, _termId, _studentId;
+    private string? _error;
+    private bool _busy;
+    private ConfirmDialog _confirm = default!;
+
+    private bool IsFamily => State.User?.RoleType is RoleType.Parent or RoleType.Student;
+    private bool CanPublish => State.User?.RoleType <= RoleType.SchoolAdmin && State.Can(Permissions.ReportCards.Manage);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += Reload;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        try
+        {
+            _lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups");
+            _termId = _lookups.CurrentTermId;
+            _familyTerms = _lookups.Terms;
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        _rows = null;
+        if (_classId is not null) await Load();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        _rows = null;
+        try { _rows = await Api.GetAsync<List<ReportCardSummaryDto>>($"api/report-cards?classId={_classId}&termId={_termId}"); }
+        catch (ApiException ex) { _error = ex.Friendly; _rows = []; }
+    }
+
+    private async Task OnClass(ChangeEventArgs e)
+    {
+        _classId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        if (_classId is not null) await Load();
+    }
+
+    private async Task OnTerm(ChangeEventArgs e)
+    {
+        _termId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        if (_classId is not null) await Load();
+    }
+
+    private async Task Publish(bool publish)
+    {
+        var text = publish
+            ? "Parents and students will be able to see and download these report cards. Comments can no longer be changed until you withdraw them."
+            : "Families will no longer see these report cards and teachers can edit comments again.";
+        if (!await _confirm.AskAsync(publish ? "Publish report cards?" : "Withdraw report cards?", text, publish ? "Publish" : "Withdraw")) return;
+        _busy = true;
+        try
+        {
+            await Api.PostAsync($"api/report-cards/publish?classId={_classId}&termId={_termId}&publish={publish.ToString().ToLowerInvariant()}");
+            Toasts.Success(publish ? "Report cards published." : "Publication withdrawn.");
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    public void Dispose() => State.ContextChanged -= Reload;
+}

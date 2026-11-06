@@ -1,0 +1,188 @@
+@page "/subjects"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@L["Subjects"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["School"]</div>
+            <h1 class="page-title">@L["Subjects"]</h1>
+        </div>
+        @if (CanManage && State.ActiveSchoolId is not null)
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["New subject"]</button></div>
+        }
+    </div>
+</div>
+
+<SchoolHint />
+
+<div class="card">
+    @if (_error is not null)
+    {
+        <div class="card-body"><div class="alert alert-danger mb-0">@_error</div></div>
+    }
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+            <thead><tr><th>@L["Subject"]</th><th>@L["Code"]</th><th class="text-center">@L["Coefficient"]</th><th class="text-center">@L["Classes"]</th><th>@L["Status"]</th><th class="w-1"></th></tr></thead>
+            <tbody>
+                @if (_items is null)
+                {
+                    <tr><td colspan="6" class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>
+                }
+                else if (_items.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-secondary text-center py-4">@L["No subjects yet."]</td></tr>
+                }
+                @foreach (var s in _items ?? [])
+                {
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="rounded-circle" style="width:12px;height:12px;background:@s.Color"></span>
+                                <div><div class="fw-semibold">@s.Name</div><div class="small text-secondary">@s.Description</div></div>
+                            </div>
+                        </td>
+                        <td><code>@s.Code</code></td>
+                        <td class="text-center">@s.Coefficient.ToString("0.##")</td>
+                        <td class="text-center">@s.ClassCount</td>
+                        <td>@if (s.IsActive) { <span class="badge bg-green-lt">@L["Active"]</span> } else { <span class="badge bg-secondary-lt">@L["Inactive"]</span> }</td>
+                        <td>
+                            @if (CanManage)
+                            {
+                                <div class="btn-list flex-nowrap">
+                                    <button class="btn btn-sm btn-icon btn-ghost-primary" title="@L["Edit"]" @onclick="() => Edit(s)"><i class="ti ti-pencil"></i></button>
+                                    <button class="btn btn-sm btn-icon btn-ghost-danger" title="@L["Delete"]" @onclick="() => Delete(s)"><i class="ti ti-trash"></i></button>
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<Modal @bind-Visible="_editing" Title="@(_editId is null ? L["New subject"] : L["Edit subject"])">
+    <ChildContent>
+        <EditForm Model="_form" OnValidSubmit="Save" id="subject-form">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label class="form-label required">@L["Name"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Name" />
+                    <ValidationMessage For="() => _form.Name" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label required">@L["Code"]</label>
+                    <InputText class="form-control text-uppercase" @bind-Value="_form.Code" />
+                    <ValidationMessage For="() => _form.Code" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Coefficient"]</label>
+                    <InputNumber class="form-control" @bind-Value="_form.Coefficient" />
+                    <div class="form-hint">@L["Weight in report-card averages."]</div>
+                    <ValidationMessage For="() => _form.Coefficient" class="invalid-feedback d-block" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Color"]</label>
+                    <input type="color" class="form-control form-control-color w-100" @bind="_form.Color" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">@L["Description"]</label>
+                    <InputText class="form-control" @bind-Value="_form.Description" />
+                </div>
+                <div class="col-12">
+                    <label class="form-check form-switch">
+                        <InputCheckbox class="form-check-input" @bind-Value="_form.IsActive" />
+                        <span class="form-check-label">@L["Active"]</span>
+                    </label>
+                </div>
+            </div>
+            @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="subject-form" disabled="@_saving">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    private List<SubjectDto>? _items;
+    private string? _error;
+    private bool _editing;
+    private bool _saving;
+    private Guid? _editId;
+    private string? _saveError;
+    private SubjectEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private bool CanManage => State.Can(Permissions.Classes.Manage);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ContextChanged += Load;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        try { _items = await Api.GetAsync<List<SubjectDto>>("api/subjects"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void New()
+    {
+        _form = new SubjectEditDto();
+        _editId = null;
+        _saveError = null;
+        _editing = true;
+    }
+
+    private void Edit(SubjectDto s)
+    {
+        _form = new SubjectEditDto { Name = s.Name, Code = s.Code, Coefficient = s.Coefficient, Color = s.Color, Description = s.Description, IsActive = s.IsActive };
+        _editId = s.Id;
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            if (_editId is { } id) await Api.PutAsync($"api/subjects/{id}", _form);
+            else await Api.PostAsync<object>("api/subjects", _form);
+            _editing = false;
+            Toasts.Success(L["Subject saved."]);
+            await Load();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(SubjectDto s)
+    {
+        if (!await _confirm.AskAsync(L["Delete subject?"], $"{s.Name} will be removed.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/subjects/{s.Id}");
+            Toasts.Success(L["Subject deleted."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    public void Dispose() => State.ContextChanged -= Load;
+}

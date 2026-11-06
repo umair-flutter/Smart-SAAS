@@ -1,0 +1,123 @@
+@implements IDisposable
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<div class="nav-item dropdown">
+    <a class="nav-link px-2 position-relative" role="button" title="@L["Notifications"]" @onclick="Toggle">
+        <i class="ti ti-bell fs-2"></i>
+        @if (_unread > 0)
+        {
+            <span class="badge bg-red text-white badge-pill position-absolute" style="top:2px; inset-inline-end:0; font-size:.62rem">@(_unread > 99 ? "99+" : _unread)</span>
+        }
+    </a>
+    @if (_open)
+    {
+        <div class="dropdown-menu dropdown-menu-end dropdown-menu-card show" style="position:absolute; inset-inline-end:0; top:100%; width:min(360px, 92vw)">
+            <div class="card">
+                <div class="card-header d-flex">
+                    <h3 class="card-title">@L["Notifications"]</h3>
+                    @if (_unread > 0)
+                    {
+                        <a role="button" class="ms-auto small" @onclick="ReadAll">@L["Mark all as read"]</a>
+                    }
+                </div>
+                <div class="list-group list-group-flush list-group-hoverable" style="max-height:360px; overflow-y:auto">
+                    @if (_items is null)
+                    {
+                        <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>@L["Loading…"]</div>
+                    }
+                    else if (_items.Count == 0)
+                    {
+                        <div class="list-group-item text-secondary">@L["You have no notifications."]</div>
+                    }
+                    @foreach (var n in _items ?? [])
+                    {
+                        <a class="list-group-item list-group-item-action" role="button" @onclick="() => Open(n)">
+                            <div class="d-flex gap-2">
+                                <span class="status-dot @(n.ReadAtUtc is null ? "status-dot-animated bg-primary" : "bg-transparent") mt-2"></span>
+                                <div class="flex-fill text-truncate">
+                                    <div class="@(n.ReadAtUtc is null ? "fw-semibold" : "") text-truncate"><i class="ti @SeverityIcon(n.Severity) me-1"></i>@n.Title</div>
+                                    <div class="small text-secondary text-truncate">@n.Body</div>
+                                    <div class="small text-secondary">@n.CreatedAtUtc.ToLocalTime().ToString("g")</div>
+                                </div>
+                            </div>
+                        </a>
+                    }
+                </div>
+                <div class="card-footer text-center"><a href="notifications" @onclick="() => _open = false">@L["View all"]</a></div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private int _unread;
+    private bool _open;
+    private List<NotificationDto>? _items;
+    private PeriodicTimer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshCount();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+        _ = Poll();
+    }
+
+    private async Task Poll()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+            {
+                await RefreshCount();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task RefreshCount()
+    {
+        try { _unread = (await Api.GetAsync<UnreadCountDto>("api/notifications/unread-count")).Count; } catch { /* signed out */ }
+    }
+
+    private async Task Toggle()
+    {
+        _open = !_open;
+        if (!_open) return;
+        _items = null;
+        try { _items = (await Api.GetPagedAsync<NotificationDto>("api/notifications", new PagedQuery { PageSize = 8 })).Items; }
+        catch { _items = []; }
+    }
+
+    private async Task Open(NotificationDto n)
+    {
+        _open = false;
+        if (n.ReadAtUtc is null)
+        {
+            try { await Api.PostAsync($"api/notifications/{n.Id}/read"); _unread = Math.Max(0, _unread - 1); } catch { }
+        }
+        Nav.NavigateTo(string.IsNullOrEmpty(n.Link) ? "notifications" : n.Link);
+    }
+
+    private async Task ReadAll()
+    {
+        try { await Api.PostAsync("api/notifications/read-all"); } catch { }
+        _unread = 0;
+        _items?.ForEach(i => i.ReadAtUtc = DateTime.UtcNow);
+    }
+
+    public static string SeverityIcon(NotificationSeverity s) => s switch
+    {
+        NotificationSeverity.Success => "ti-circle-check text-success",
+        NotificationSeverity.Warning => "ti-alert-triangle text-warning",
+        NotificationSeverity.Critical => "ti-alert-octagon text-danger",
+        _ => "ti-info-circle text-info"
+    };
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _timer = null;
+    }
+}

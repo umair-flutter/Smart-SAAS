@@ -1,0 +1,276 @@
+@page "/students/{Id:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@(_s?.FullName ?? "Student") · SmartSchool</PageTitle>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_s is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    <div class="page-header mb-3">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <a href="students" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Students"]</a>
+                <h1 class="page-title mt-1">@_s.FullName</h1>
+            </div>
+            <div class="col-auto ms-auto btn-list">
+                @if (State.Can(Permissions.Students.Edit))
+                {
+                    <button class="btn" @onclick="OpenEdit"><i class="ti ti-pencil me-1"></i>@L["Edit"]</button>
+                }
+                @if (State.Can(Permissions.Students.Delete))
+                {
+                    <button class="btn btn-ghost-danger" @onclick="Delete"><i class="ti ti-trash me-1"></i>@L["Delete"]</button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="row row-cards">
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-body text-center">
+                    <span class="avatar avatar-xl mb-3 @(_s.Gender == Gender.Female ? "bg-pink-lt" : "bg-azure-lt")">@string.Concat(_s.FullName.Split(' ').Take(2).Select(p => p[0]))</span>
+                    <h3 class="mb-1">@_s.FullName</h3>
+                    <div class="text-secondary"><code>@_s.StudentNo</code></div>
+                    <div class="mt-2">
+                        @if (_s.ClassName is not null) { <span class="badge bg-blue-lt">@_s.ClassName</span> } else { <span class="badge bg-secondary-lt">@L["Not enrolled this year"]</span> }
+                        <PersonStatus S="_s.Status" />
+                        @if (!_s.IsActive) { <span class="badge bg-secondary-lt ms-1">@L["Inactive"]</span> }
+                        @if (_s.HasLogin) { <span class="badge bg-green-lt ms-1"><i class="ti ti-key me-1"></i>@L["Sign-in"]</span> }
+                    </div>
+                </div>
+                <div class="card-body border-top">
+                    <dl class="row mb-0 small">
+                        <dt class="col-5 fw-normal text-secondary">@L["Date of birth"]</dt><dd class="col-7">@(_s.DateOfBirth?.ToString("yyyy-MM-dd") ?? "—")</dd>
+                        <dt class="col-5 fw-normal text-secondary">@L["Gender"]</dt><dd class="col-7">@(_s.Gender?.ToString() ?? "—")</dd>
+                        <dt class="col-5 fw-normal text-secondary">@L["Admitted"]</dt><dd class="col-7">@(_s.AdmissionDate?.ToString("yyyy-MM-dd") ?? "—")</dd>
+                        <dt class="col-5 fw-normal text-secondary">@L["Email"]</dt><dd class="col-7 text-break">@(_s.Email ?? "—")</dd>
+                        <dt class="col-5 fw-normal text-secondary">@L["Phone"]</dt><dd class="col-7">@(_s.Phone ?? "—")</dd>
+                        <dt class="col-5 fw-normal text-secondary">@L["Address"]</dt><dd class="col-7">@(_s.Address ?? "—")</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h3 class="card-title">@L["Parents & guardians"]</h3>
+                    @if (State.Can(Permissions.Students.Edit))
+                    {
+                        <div class="card-actions"><button class="btn btn-sm" @onclick="OpenLink"><i class="ti ti-link me-1"></i>@L["Link parent"]</button></div>
+                    }
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (_s.GuardianLinks.Count == 0)
+                    {
+                        <div class="list-group-item text-secondary">@L["No parent or guardian linked yet."]</div>
+                    }
+                    @foreach (var g in _s.GuardianLinks)
+                    {
+                        <div class="list-group-item d-flex align-items-center gap-3">
+                            <div class="flex-fill">
+                                <div class="fw-semibold">@g.FullName @if (g.IsPrimary) { <span class="badge bg-primary-lt ms-1">@L["Primary contact"]</span> }</div>
+                                <div class="small text-secondary">@g.Relationship · @g.Phone @g.Email</div>
+                            </div>
+                            @if (State.Can(Permissions.Students.Edit))
+                            {
+                                <button class="btn btn-sm btn-ghost-danger" title="@L["Unlink"]" @onclick="() => Unlink(g)"><i class="ti ti-unlink"></i></button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3 class="card-title">@L["Enrolment history"]</h3></div>
+                <div class="table-responsive">
+                    <table class="table card-table table-vcenter">
+                        <thead><tr><th>@L["Academic year"]</th><th>@L["Class"]</th><th>@L["Since"]</th><th>@L["Status"]</th></tr></thead>
+                        <tbody>
+                            @if (_s.Enrollments.Count == 0)
+                            {
+                                <tr><td colspan="4" class="text-secondary">@L["Not enrolled in any class yet. Enrol from a class page."]</td></tr>
+                            }
+                            @foreach (var e in _s.Enrollments)
+                            {
+                                <tr>
+                                    <td>@e.AcademicYearName</td>
+                                    <td><a href="classes/@e.ClassId">@e.ClassName</a></td>
+                                    <td class="text-secondary">@e.EnrolledOn.ToString("yyyy-MM-dd")</td>
+                                    <td><span class="badge @(e.Status == EnrollmentStatus.Active ? "bg-green-lt" : "bg-secondary-lt")">@e.Status</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<Modal @bind-Visible="_editing" Title="@L["Edit student"]" Size="lg">
+    <ChildContent>
+        <StudentForm Model="_form" HasLogin="_s?.HasLogin == true" FormId="student-edit-form" OnValidSubmit="Save" />
+        @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="student-edit-form" disabled="@_busy">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<Modal @bind-Visible="_linking" Title="@L["Link parent or guardian"]">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label required">@L["Parent / guardian"]</label>
+                <select class="form-select" @bind="_linkGuardian">
+                    <option value="">@L["Select…"]</option>
+                    @foreach (var g in _guardians)
+                    {
+                        <option value="@g.Id">@g.Name</option>
+                    }
+                </select>
+                <div class="form-hint">@L["Not listed? Add them on the"] <a href="parents">@L["Parents & guardians"]</a> page first.</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">@L["Relationship"]</label>
+                <select class="form-select" @bind="_link.Relationship">
+                    @foreach (var r in new[] { "Mother", "Father", "Guardian", "Grandparent", "Sibling", "Other" })
+                    {
+                        <option value="@r">@r</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <label class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" @bind="_link.IsPrimary" />
+                    <span class="form-check-label">@L["Primary contact"]</span>
+                </label>
+            </div>
+        </div>
+        @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _linking = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveLink">@L["Link"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private StudentDetailDto? _s;
+    private string? _error;
+    private bool _editing;
+    private bool _linking;
+    private bool _busy;
+    private string? _saveError;
+    private StudentEditDto _form = new();
+    private LinkGuardianDto _link = new();
+    private string _linkGuardian = "";
+    private List<LookupItem> _guardians = [];
+    private ConfirmDialog _confirm = default!;
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _s = await Api.GetAsync<StudentDetailDto>($"api/students/{Id}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task OpenEdit()
+    {
+        try
+        {
+            _form = await Api.GetAsync<StudentEditDto>($"api/students/{Id}/edit");
+            _saveError = null;
+            _editing = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        _saveError = null;
+        try
+        {
+            await Api.PutAsync($"api/students/{Id}", _form);
+            _editing = false;
+            Toasts.Success(L["Student updated."]);
+            await Load();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task OpenLink()
+    {
+        try
+        {
+            var lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups");
+            var linked = _s!.GuardianLinks.Select(g => g.GuardianId).ToHashSet();
+            _guardians = lookups.Guardians.Where(g => !linked.Contains(g.Id)).ToList();
+            _link = new LinkGuardianDto { Relationship = "Mother", IsPrimary = _s.GuardianLinks.Count == 0 };
+            _linkGuardian = "";
+            _saveError = null;
+            _linking = true;
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task SaveLink()
+    {
+        if (!Guid.TryParse(_linkGuardian, out var gid)) { _saveError = L["Select a parent or guardian."]; return; }
+        _link.GuardianId = gid;
+        _busy = true;
+        _saveError = null;
+        try
+        {
+            await Api.PostAsync($"api/students/{Id}/guardians", _link);
+            _linking = false;
+            Toasts.Success(L["Parent linked."]);
+            await Load();
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task Unlink(StudentGuardianDto g)
+    {
+        if (!await _confirm.AskAsync(L["Unlink parent?"], $"{g.FullName} will no longer be linked to {_s!.FullName}.", L["Unlink"])) return;
+        try
+        {
+            await Api.DeleteAsync($"api/students/{Id}/guardians/{g.GuardianId}");
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Delete()
+    {
+        if (!await _confirm.AskAsync(L["Delete student?"], $"{_s!.FullName} and their enrolments will be removed.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/students/{Id}");
+            Toasts.Success(L["Student deleted."]);
+            Nav.NavigateTo("students");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

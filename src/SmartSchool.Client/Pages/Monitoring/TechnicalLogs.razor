@@ -1,0 +1,89 @@
+@page "/monitoring/logs"
+@inherits ListPageBase<TechnicalLogDto>
+
+<PageTitle>@L["Technical logs"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Monitoring"]</div>
+            <h1 class="page-title">@L["Technical logs"]</h1>
+        </div>
+        <div class="col-auto ms-auto btn-list">
+            <button class="btn" @onclick="LoadAsync"><i class="ti ti-refresh me-1"></i>@L["Refresh"]</button>
+            <button class="btn btn-ghost-danger" @onclick="Purge"><i class="ti ti-trash me-1"></i>@L["Delete entries older than 7 days"]</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex flex-wrap gap-2">
+        <div class="input-icon" style="max-width:320px; flex:1 1 220px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search message, path or request id…"]" @oninput="OnSearchInput" />
+        </div>
+        <select class="form-select" style="max-width:170px" @onchange="OnLevel">
+            <option value="">@L["Warnings and errors"]</option>
+            @foreach (var l in new[] { "Warning", "Error", "Fatal" }) { <option value="@l">@L[l]</option> }
+        </select>
+    </div>
+    @if (LoadError is not null) { <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div> }
+    <div class="list-group list-group-flush">
+        @if (Result?.Items.Count == 0) { <div class="list-group-item text-secondary text-center py-4">@L["No warnings or errors logged."]</div> }
+        @foreach (var log in Result?.Items ?? [])
+        {
+            <div class="list-group-item">
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <span class="badge @(log.Level is "Error" or "Fatal" ? "bg-red-lt" : "bg-yellow-lt")">@L[log.Level]</span>
+                    <span class="small text-secondary">@log.TimestampUtc.ToLocalTime().ToString("G")</span>
+                    @if (log.RequestPath is not null) { <code class="small">@log.RequestPath</code> }
+                    @if (log.TraceId is not null) { <span class="small text-secondary">@L["Request"] @log.TraceId</span> }
+                </div>
+                <div class="mt-1 text-break">@log.Message</div>
+                <div class="small text-secondary">@log.SourceContext</div>
+                @if (log.Exception is not null)
+                {
+                    @if (_open.Contains(log.Id))
+                    {
+                        <pre class="mt-2 small mb-0" style="max-height:260px; overflow:auto; white-space:pre-wrap">@log.Exception</pre>
+                    }
+                    else
+                    {
+                        <a role="button" class="small" @onclick="() => _open.Add(log.Id)"><i class="ti ti-chevron-down me-1"></i>@L["Show exception"]</a>
+                    }
+                }
+            </div>
+        }
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    protected override string Endpoint => "api/monitoring/logs";
+    protected override string? ExtraQuery => string.IsNullOrEmpty(_level) ? null : $"level={_level}";
+
+    private string? _level;
+    private readonly HashSet<long> _open = [];
+    private ConfirmDialog _confirm = default!;
+
+    private async Task OnLevel(ChangeEventArgs e)
+    {
+        _level = e.Value?.ToString();
+        Query.Page = 1;
+        await LoadAsync();
+    }
+
+    private async Task Purge()
+    {
+        if (!await _confirm.AskAsync(L["Delete old logs?"], L["Technical log entries older than 7 days will be deleted. The daily log files on the server are kept."], L["Delete"])) return;
+        try
+        {
+            await Api.DeleteAsync("api/monitoring/logs?olderThanDays=7");
+            Toasts.Success(L["Old entries deleted."]);
+            await LoadAsync();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

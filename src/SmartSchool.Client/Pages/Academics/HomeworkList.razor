@@ -1,0 +1,164 @@
+@page "/homework"
+@inherits ListPageBase<HomeworkDto>
+@inject NavigationManager Nav
+
+<PageTitle>@L["Homework"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Academics"]</div>
+            <h1 class="page-title">@L["Homework"]</h1>
+        </div>
+        @if (State.Can(Permissions.Homework.Manage) && !IsFamily)
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="New"><i class="ti ti-plus me-1"></i>@L["Set homework"]</button></div>
+        }
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body border-bottom py-3 d-flex flex-wrap gap-2 align-items-center">
+        @if (IsFamily)
+        {
+            <StudentPicker Selected="_studentId" OnSelected="OnStudentSelected" />
+        }
+        else
+        {
+            <select class="form-select" style="max-width:200px" @onchange="OnClassFilter">
+                <option value="">@L["All classes"]</option>
+                @foreach (var c in _lookups?.Classes ?? []) { <option value="@c.Id">@c.Name</option> }
+            </select>
+        }
+        <select class="form-select" style="max-width:200px" @onchange="OnSubjectFilter">
+            <option value="">@L["All subjects"]</option>
+            @foreach (var s in _lookups?.Subjects ?? []) { <option value="@s.Id">@s.Name</option> }
+        </select>
+        <label class="form-check form-switch mb-0">
+            <input type="checkbox" class="form-check-input" @onchange="OnUpcoming" />
+            <span class="form-check-label">@L["Upcoming only"]</span>
+        </label>
+        <div class="input-icon ms-auto" style="max-width:260px">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input type="search" class="form-control" placeholder="@L["Search…"]" @oninput="OnSearchInput" />
+        </div>
+    </div>
+    @if (LoadError is not null) { <div class="card-body"><div class="alert alert-danger mb-0">@LoadError</div></div> }
+    <div class="table-responsive">
+        <table class="table card-table table-vcenter table-hover">
+            <thead>
+                <tr>
+                    <SortHeader Title="@L["Homework"]" Column="title" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@L["Class"]</th>
+                    <SortHeader Title="@L["Due"]" Column="due" Current="@Query.SortBy" Desc="@Query.SortDesc" OnSort="SortBy" />
+                    <th>@(IsFamily ? "My work" : "Submissions")</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Result?.Items.Count == 0) { <tr><td colspan="4" class="text-secondary text-center py-4">@L["No homework found."]</td></tr> }
+                @foreach (var h in Result?.Items ?? [])
+                {
+                    var overdue = h.DueAtUtc < DateTime.UtcNow;
+                    <tr role="button" @onclick='() => Nav.NavigateTo(StudentLink($"homework/{h.Id}"))'>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="rounded" style="width:4px;height:32px;background:@h.SubjectColor"></span>
+                                <div>
+                                    <div class="fw-semibold">@h.Title @if (!h.IsPublished) { <span class="badge bg-secondary-lt ms-1">@L["Draft"]</span> }</div>
+                                    <div class="small text-secondary">@h.SubjectName · @h.TeacherName</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>@h.ClassName</td>
+                        <td class="@(overdue ? "text-secondary" : "fw-semibold")">@h.DueAtUtc.ToLocalTime().ToString("ddd d MMM, HH:mm")</td>
+                        <td>
+                            @if (IsFamily)
+                            {
+                                @if (h.MyStatus is null)
+                                {
+                                    <span class="badge @(overdue ? "bg-red-lt" : "bg-secondary-lt")">@(overdue ? "Not handed in" : "To do")</span>
+                                }
+                                else
+                                {
+                                    <span class="badge @(h.MyStatus == SubmissionStatus.Submitted ? "bg-blue-lt" : "bg-green-lt")">@h.MyStatus</span>
+                                    @if (h.MyIsLate == true) { <span class="badge bg-yellow-lt ms-1">@L["Late"]</span> }
+                                    @if (h.MyScore is { } sc) { <span class="ms-1 fw-semibold">@sc.ToString("0.##")/@h.MaxScore?.ToString("0.##")</span> }
+                                }
+                            }
+                            else
+                            {
+                                <div class="small">@h.SubmittedCount / @h.StudentCount handed in · @h.GradedCount graded @if (h.LateCount > 0) { <span class="text-warning">· @h.LateCount late</span> }</div>
+                                <div class="progress progress-sm mt-1" style="max-width:160px"><div class="progress-bar" style="width:@(h.StudentCount == 0 ? 0 : h.SubmittedCount * 100 / h.StudentCount)%"></div></div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager Page="@(Result?.Page ?? 1)" PageSize="@(Result?.PageSize ?? 20)" TotalCount="@(Result?.TotalCount ?? 0)" OnPage="GoToPage" />
+</div>
+
+<Modal @bind-Visible="_editing" Title="@L["Set homework"]" Size="lg">
+    <ChildContent>
+        <HomeworkForm Model="_form" Lookups="_lookups" FormId="hw-form" OnValidSubmit="Save" />
+        @if (_saveError is not null) { <div class="alert alert-danger mt-3 mb-0">@_saveError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="hw-form" disabled="@_saving">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+@code {
+    protected override string Endpoint => "api/homework";
+    protected override string? ExtraQuery => string.Join('&', new[]
+    {
+        _classId is null ? null : $"classId={_classId}",
+        _subjectId is null ? null : $"subjectId={_subjectId}",
+        _studentId is null ? null : $"studentId={_studentId}",
+        _upcoming ? "upcoming=true" : null
+    }.Where(x => x is not null));
+
+    private bool IsFamily => State.User?.RoleType is RoleType.Parent or RoleType.Student;
+    private SchoolLookupsDto? _lookups;
+    private Guid? _classId, _subjectId, _studentId;
+    private bool _upcoming;
+    private bool _editing, _saving;
+    private string? _saveError;
+    private HomeworkEditDto _form = new();
+
+    protected override async Task OnInitializedPageAsync()
+    {
+        try { _lookups = await Api.GetAsync<SchoolLookupsDto>("api/school/lookups"); } catch (ApiException) { }
+    }
+
+    private string StudentLink(string url) => IsFamily && _studentId is { } s ? $"{url}?studentId={s}" : url;
+
+    private async Task OnStudentSelected(MyStudentDto s) { _studentId = s.StudentId; await LoadAsync(); }
+    private async Task OnClassFilter(ChangeEventArgs e) { _classId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null; Query.Page = 1; await LoadAsync(); }
+    private async Task OnSubjectFilter(ChangeEventArgs e) { _subjectId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null; Query.Page = 1; await LoadAsync(); }
+    private async Task OnUpcoming(ChangeEventArgs e) { _upcoming = e.Value is true; Query.Page = 1; await LoadAsync(); }
+
+    private void New()
+    {
+        _form = new HomeworkEditDto { ClassId = _classId, SubjectId = _subjectId };
+        _saveError = null;
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            var created = await Api.PostAsync<Dictionary<string, Guid>>("api/homework", _form);
+            _editing = false;
+            Toasts.Success(L["Homework set."]);
+            Nav.NavigateTo($"homework/{created["id"]}");
+        }
+        catch (ApiException ex) { _saveError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+}

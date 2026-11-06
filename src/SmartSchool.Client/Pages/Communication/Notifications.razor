@@ -1,0 +1,262 @@
+@page "/notifications"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>@L["Notifications"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="page-pretitle">@L["Communication"]</div>
+    <h1 class="page-title">@L["Notifications"]</h1>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link @(_tab == "inbox" ? "active" : "")" role="button" @onclick='() => SetTab("inbox")'><i class="ti ti-inbox me-1"></i>@L["Inbox"]</a></li>
+    @if (CanSend)
+    {
+        <li class="nav-item"><a class="nav-link @(_tab == "compose" ? "active" : "")" role="button" @onclick='() => SetTab("compose")'><i class="ti ti-send me-1"></i>@L["Send a message"]</a></li>
+        <li class="nav-item"><a class="nav-link @(_tab == "sent" ? "active" : "")" role="button" @onclick='() => SetTab("sent")'><i class="ti ti-history me-1"></i>@L["Sent"]</a></li>
+    }
+</ul>
+
+@if (_tab == "inbox")
+{
+    <div class="card">
+        <div class="card-body border-bottom py-3 d-flex gap-2 flex-wrap align-items-center">
+            <label class="form-check form-switch mb-0">
+                <input type="checkbox" class="form-check-input" checked="@_unreadOnly" @onchange="OnUnreadOnly" />
+                <span class="form-check-label">@L["Unread only"]</span>
+            </label>
+            <button class="btn btn-sm ms-auto" @onclick="ReadAll"><i class="ti ti-checks me-1"></i>@L["Mark all as read"]</button>
+        </div>
+        <div class="list-group list-group-flush">
+            @if (_inbox?.Items.Count == 0) { <div class="list-group-item text-secondary text-center py-4">@L["You have no notifications."]</div> }
+            @foreach (var n in _inbox?.Items ?? [])
+            {
+                <div class="list-group-item @(n.ReadAtUtc is null ? "bg-azure-lt" : "")">
+                    <div class="d-flex gap-3 align-items-start">
+                        <i class="ti @NotificationBell.SeverityIcon(n.Severity) fs-2 mt-1"></i>
+                        <div class="flex-fill">
+                            <div class="d-flex flex-wrap gap-2 align-items-center">
+                                <span class="@(n.ReadAtUtc is null ? "fw-bold" : "fw-semibold")">@n.Title</span>
+                                <span class="badge bg-secondary-lt">@L[n.Kind.ToString()]</span>
+                                <span class="small text-secondary ms-auto">@n.CreatedAtUtc.ToLocalTime().ToString("g")</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(n.Body)) { <div class="mt-1" style="white-space:pre-line">@n.Body</div> }
+                            <div class="mt-2 d-flex gap-2 align-items-center">
+                                @if (!string.IsNullOrEmpty(n.Link))
+                                {
+                                    <button class="btn btn-sm btn-primary" @onclick="() => Open(n)">@(n.ActionLabel is null ? L["Open"] : L[n.ActionLabel])</button>
+                                }
+                                @if (n.ReadAtUtc is null)
+                                {
+                                    <button class="btn btn-sm" @onclick="() => MarkRead(n)">@L["Mark as read"]</button>
+                                }
+                                @if (n.SenderName is not null) { <span class="small text-secondary">@L["From"] @n.SenderName</span> }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+        <Pager Page="@(_inbox?.Page ?? 1)" PageSize="@(_inbox?.PageSize ?? 20)" TotalCount="@(_inbox?.TotalCount ?? 0)" OnPage="p => { _query.Page = p; return LoadInbox(); }" />
+    </div>
+}
+else if (_tab == "compose")
+{
+    <div class="card">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">@L["Send to"]</label>
+                    <select class="form-select" @bind="_msg.Audience">
+                        @if (State.Can(Permissions.Notifications.Send) && _lookups?.Classes.Count > 0) { <option value="@AudienceType.Class">@L["Students and/or parents of a class"]</option> }
+                        @if (State.Can(Permissions.Notifications.Broadcast)) { <option value="@AudienceType.Roles">@L["Everyone with selected roles"]</option> }
+                        @if (State.IsSuperAdmin) { <option value="@AudienceType.Platform">@L["All tenants (platform announcement)"]</option> }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Importance"]</label>
+                    <select class="form-select" @bind="_msg.Severity">
+                        @foreach (var s in Enum.GetValues<NotificationSeverity>()) { <option value="@s">@L[s.ToString()]</option> }
+                    </select>
+                </div>
+
+                @if (_msg.Audience == AudienceType.Class)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label required">@L["Class"]</label>
+                        <select class="form-select" @bind="_classId">
+                            <option value="">@L["Select…"]</option>
+                            @foreach (var c in _lookups?.Classes ?? []) { <option value="@c.Id">@c.Name</option> }
+                        </select>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end gap-3">
+                        <label class="form-check mb-2"><input type="checkbox" class="form-check-input" @bind="_msg.IncludeStudents" /><span class="form-check-label">@L["Students"]</span></label>
+                        <label class="form-check mb-2"><input type="checkbox" class="form-check-input" @bind="_msg.IncludeParents" /><span class="form-check-label">@L["Parents"]</span></label>
+                    </div>
+                }
+                else
+                {
+                    <div class="col-12">
+                        <label class="form-label">@L["Roles"] <span class="text-secondary small">(@L["none selected = everyone"])</span></label>
+                        <div class="d-flex flex-wrap gap-3">
+                            @foreach (var r in Enum.GetValues<RoleType>().Where(r => r != RoleType.SuperAdmin))
+                            {
+                                <label class="form-check mb-0">
+                                    <input type="checkbox" class="form-check-input" checked="@_msg.Roles.Contains(r)" @onchange="e => ToggleRole(r, e)" />
+                                    <span class="form-check-label">@L[r.DisplayName()]</span>
+                                </label>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="col-12">
+                    <label class="form-label required">@L["Title"]</label>
+                    <input class="form-control" maxlength="200" @bind="_msg.Title" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">@L["Message"]</label>
+                    <textarea class="form-control" rows="5" maxlength="4000" @bind="_msg.Body"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Link (optional)"]</label>
+                    <input class="form-control" placeholder="@L["homework, exams, invoices…"]" @bind="_msg.Link" />
+                    <div class="form-hint">@L["A page of this application that opens from the notification."]</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@L["Button label"]</label>
+                    <input class="form-control" maxlength="60" placeholder="@L["Open"]" @bind="_msg.ActionLabel" />
+                </div>
+            </div>
+            @if (_error is not null) { <div class="alert alert-danger mt-3 mb-0">@_error</div> }
+        </div>
+        <div class="card-footer d-flex">
+            <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="Send"><i class="ti ti-send me-1"></i>@L["Send"]</button>
+        </div>
+    </div>
+}
+else if (_tab == "sent")
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+                <thead><tr><th>@L["Message"]</th><th>@L["Audience"]</th><th>@L["Sent"]</th><th>@L["Read"]</th></tr></thead>
+                <tbody>
+                    @if (_sent?.Items.Count == 0) { <tr><td colspan="4" class="text-secondary text-center py-4">@L["Nothing sent yet."]</td></tr> }
+                    @foreach (var s in _sent?.Items ?? [])
+                    {
+                        var pct = s.RecipientCount == 0 ? 0 : s.ReadCount * 100 / s.RecipientCount;
+                        <tr>
+                            <td><div class="fw-semibold"><i class="ti @NotificationBell.SeverityIcon(s.Severity) me-1"></i>@s.Title</div><div class="small text-secondary">@s.SenderName</div></td>
+                            <td class="small">@s.AudienceLabel</td>
+                            <td class="small text-secondary">@s.CreatedAtUtc.ToLocalTime().ToString("g")</td>
+                            <td style="min-width:150px">
+                                <div class="small">@s.ReadCount / @s.RecipientCount</div>
+                                <div class="progress progress-sm"><div class="progress-bar" style="width:@(pct)%"></div></div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <Pager Page="@(_sent?.Page ?? 1)" PageSize="@(_sent?.PageSize ?? 20)" TotalCount="@(_sent?.TotalCount ?? 0)" OnPage="p => { _sentQuery.Page = p; return LoadSent(); }" />
+    </div>
+}
+
+@code {
+    private string _tab = "inbox";
+    private bool _unreadOnly;
+    private readonly PagedQuery _query = new();
+    private readonly PagedQuery _sentQuery = new();
+    private PagedResult<NotificationDto>? _inbox;
+    private PagedResult<SentNotificationDto>? _sent;
+    private SchoolLookupsDto? _lookups;
+    private SendNotificationDto _msg = new();
+    private string _classId = "";
+    private string? _error;
+    private bool _busy;
+
+    private bool CanSend => State.Can(Permissions.Notifications.Send) && State.User?.RoleType is not (RoleType.Parent or RoleType.Student);
+
+    protected override Task OnInitializedAsync() => LoadInbox();
+
+    private async Task SetTab(string tab)
+    {
+        _tab = tab;
+        _error = null;
+        if (tab == "inbox") await LoadInbox();
+        else if (tab == "sent") await LoadSent();
+        else
+        {
+            try { _lookups ??= await Api.GetAsync<SchoolLookupsDto>("api/school/lookups"); } catch (ApiException) { }
+            _msg = new SendNotificationDto
+            {
+                Audience = _lookups?.Classes.Count > 0 ? AudienceType.Class : State.Can(Permissions.Notifications.Broadcast) ? AudienceType.Roles : AudienceType.Class
+            };
+        }
+    }
+
+    private async Task LoadInbox()
+    {
+        try { _inbox = await Api.GetPagedAsync<NotificationDto>("api/notifications", _query, _unreadOnly ? "unread=true" : null); }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task LoadSent()
+    {
+        try { _sent = await Api.GetPagedAsync<SentNotificationDto>("api/notifications/sent", _sentQuery); }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task OnUnreadOnly(ChangeEventArgs e)
+    {
+        _unreadOnly = e.Value is true;
+        _query.Page = 1;
+        await LoadInbox();
+    }
+
+    private async Task MarkRead(NotificationDto n)
+    {
+        try { await Api.PostAsync($"api/notifications/{n.Id}/read"); n.ReadAtUtc = DateTime.UtcNow; } catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task ReadAll()
+    {
+        try { await Api.PostAsync("api/notifications/read-all"); await LoadInbox(); } catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task Open(NotificationDto n)
+    {
+        if (n.ReadAtUtc is null) await MarkRead(n);
+        Nav.NavigateTo(n.Link!);
+    }
+
+    private void ToggleRole(RoleType r, ChangeEventArgs e)
+    {
+        if (e.Value is true) { if (!_msg.Roles.Contains(r)) _msg.Roles.Add(r); }
+        else _msg.Roles.Remove(r);
+    }
+
+    private async Task Send()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_msg.Title)) { _error = L["Enter a title."]; return; }
+        if (_msg.Audience == AudienceType.Class)
+        {
+            if (!Guid.TryParse(_classId, out var cid)) { _error = L["Choose a class."]; return; }
+            _msg.ClassId = cid;
+        }
+        _busy = true;
+        try
+        {
+            var r = await Api.PostAsync<Dictionary<string, object>>("api/notifications/send", _msg);
+            Toasts.Success(L.F("Sent to {0} recipient(s).", r.GetValueOrDefault("recipients")));
+            await SetTab("sent");
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+        finally { _busy = false; }
+    }
+}

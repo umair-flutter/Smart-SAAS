@@ -1,0 +1,16 @@
+@inject AppState State
+
+@if (State.ActiveSchoolId is null)
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 py-2">
+        <i class="ti ti-school"></i>
+        <span>@(State.IsSuperAdmin && State.ActiveTenantId is null
+            ? "Choose a tenant and then a school in the top bar to manage school records."
+            : "Showing all schools. Choose a school in the top bar to add or change records.")</span>
+    </div>
+}
+
+@code {
+    /// <summary>True when the page can create records (a school is selected).</summary>
+    public bool HasSchool => State.ActiveSchoolId is not null;
+}

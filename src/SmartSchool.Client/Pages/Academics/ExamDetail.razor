@@ -1,0 +1,229 @@
+@page "/exams/{Id:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject FileHelper Files
+@inject NavigationManager Nav
+
+<PageTitle>@(_e?.Title ?? "Exam") · SmartSchool</PageTitle>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_e is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    <div class="page-header mb-3">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <a href="exams" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Exams"]</a>
+                <h1 class="page-title mt-1">@_e.Title</h1>
+                <div class="text-secondary small mt-1">
+                    <span class="badge me-1" style="background:@_e.SubjectColor">@_e.SubjectName</span>
+                    @_e.ClassName · @_e.Type · @_e.Date.ToString("dddd d MMMM yyyy") · @_e.TermName · out of @_e.MaxScore.ToString("0.##") · weight ×@_e.Weight.ToString("0.##")
+                </div>
+            </div>
+            @if (CanEdit)
+            {
+                <div class="col-auto ms-auto btn-list">
+                    <button class="btn @(_e.ResultsPublished ? "" : "btn-success")" @onclick="TogglePublish">
+                        <i class="ti @(_e.ResultsPublished ? "ti-eye-off" : "ti-eye") me-1"></i>@(_e.ResultsPublished ? "Unpublish results" : "Publish results")
+                    </button>
+                    <button class="btn" @onclick="OpenEdit"><i class="ti ti-pencil me-1"></i>@L["Edit"]</button>
+                    <button class="btn btn-ghost-danger" @onclick="Delete"><i class="ti ti-trash"></i></button>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="row row-cards mb-3">
+        @foreach (var (label, value) in new[] { ("Average", _e.Average), ("Highest", _e.Highest), ("Lowest", _e.Lowest) })
+        {
+            <div class="col-sm-4 col-lg-2">
+                <div class="card card-sm"><div class="card-body"><div class="text-secondary small">@label</div><div class="h2 mb-0">@(value?.ToString("0.##") ?? "—")</div></div></div>
+            </div>
+        }
+        <div class="col-lg-6">
+            <div class="card card-sm h-100">
+                <div class="card-body d-flex align-items-center gap-2 flex-wrap">
+                    @if (_e.Document is { } d)
+                    {
+                        <a role="button" class="btn btn-outline-primary btn-sm" @onclick="() => Files.DownloadAsync(d)"><i class="ti ti-file-text me-1"></i>@d.FileName</a>
+                    }
+                    else { <span class="text-secondary small">@L["No exam document."]</span> }
+                    @if (CanEdit)
+                    {
+                        <InputFile class="form-control form-control-sm ms-auto" style="max-width:260px" OnChange="UploadDocument" />
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_e.Description)) { <p class="text-secondary">@_e.Description</p> }
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">@(IsFamily ? "Result" : "Results")</h3>
+            @if (!IsFamily) { <div class="card-actions small text-secondary">@_e.Results.Count(r => r.Score is not null || r.IsAbsent) / @_e.Results.Count entered</div> }
+        </div>
+        @if (IsFamily && !_e.ResultsPublished)
+        {
+            <div class="card-body text-secondary">@L["The results of this exam have not been published yet."]</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table card-table table-vcenter">
+                    <thead><tr><th>@L["Student"]</th><th style="width:140px">Score / @_e.MaxScore.ToString("0.##")</th><th style="width:90px">@L["Absent"]</th><th>@L["Comment"]</th><th style="width:80px">/20</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _e.Results)
+                        {
+                            <tr>
+                                <td><div class="fw-semibold">@r.StudentName</div><div class="small text-secondary">@r.StudentNo</div></td>
+                                <td>
+                                    @if (CanEdit)
+                                    {
+                                        <input type="number" step="0.25" min="0" max="@_e.MaxScore" class="form-control form-control-sm @(r.Score > _e.MaxScore ? "is-invalid" : "")"
+                                               disabled="@r.IsAbsent" @bind="r.Score" @bind:event="oninput" />
+                                    }
+                                    else { <span class="fw-bold">@(r.IsAbsent ? "—" : r.Score?.ToString("0.##") ?? "—")</span> }
+                                </td>
+                                <td>
+                                    @if (CanEdit) { <input type="checkbox" class="form-check-input" @bind="r.IsAbsent" /> }
+                                    else if (r.IsAbsent) { <span class="badge bg-red-lt">@L["Absent"]</span> }
+                                </td>
+                                <td>
+                                    @if (CanEdit) { <input class="form-control form-control-sm" @bind="r.Comment" /> }
+                                    else { <span class="small">@r.Comment</span> }
+                                </td>
+                                <td class="text-secondary">@(r.Score is { } s && !r.IsAbsent && _e.MaxScore > 0 ? (s / _e.MaxScore * 20).ToString("0.##") : "")</td>
+                            </tr>
+                        }
+                        @if (_e.Results.Count == 0) { <tr><td colspan="5" class="text-secondary">@L["No students."]</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+            @if (CanEdit)
+            {
+                <div class="card-footer d-flex">
+                    <button class="btn btn-primary ms-auto" disabled="@_busy" @onclick="SaveResults"><i class="ti ti-device-floppy me-1"></i>@L["Save results"]</button>
+                </div>
+            }
+        }
+    </div>
+}
+
+<Modal @bind-Visible="_editing" Title="@L["Edit exam"]" Size="lg">
+    <ChildContent>
+        <ExamForm Model="_form" Lookups="_lookups" FormId="exam-edit-form" OnValidSubmit="SaveEdit" />
+        @if (_modalError is not null) { <div class="alert alert-danger mt-3 mb-0">@_modalError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _editing = false">Cancel</button>
+        <button class="btn btn-primary ms-auto" type="submit" form="exam-edit-form" disabled="@_busy">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromQuery] public Guid? StudentId { get; set; }
+
+    private ExamDetailDto? _e;
+    private SchoolLookupsDto? _lookups;
+    private string? _error, _modalError;
+    private bool _busy, _editing;
+    private ExamEditDto _form = new();
+    private ConfirmDialog _confirm = default!;
+
+    private bool IsFamily => State.User?.RoleType is RoleType.Parent or RoleType.Student;
+    private bool CanEdit => !IsFamily && State.Can(Permissions.Exams.EnterResults);
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _e = await Api.GetAsync<ExamDetailDto>($"api/exams/{Id}{(StudentId is { } s ? $"?studentId={s}" : "")}"); }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task SaveResults()
+    {
+        _busy = true;
+        try
+        {
+            await Api.PutAsync($"api/exams/{Id}/results", new ExamResultsSaveDto { Results = _e!.Results });
+            Toasts.Success(L["Results saved."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    private async Task TogglePublish()
+    {
+        try
+        {
+            await Api.PostAsync($"api/exams/{Id}/publish?publish={(!_e!.ResultsPublished).ToString().ToLowerInvariant()}");
+            Toasts.Success(_e.ResultsPublished ? "Results hidden from students and parents." : "Results published to students and parents.");
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task UploadDocument(InputFileChangeEventArgs e)
+    {
+        using var form = new MultipartFormDataContent();
+        if (!Files.TryAdd(form, e.File)) return;
+        try
+        {
+            await Api.PostFormAsync<FileDto>($"api/exams/{Id}/document", form);
+            Toasts.Success(L["Document attached."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private async Task OpenEdit()
+    {
+        try { _lookups ??= await Api.GetAsync<SchoolLookupsDto>("api/school/lookups"); } catch (ApiException) { }
+        _form = new ExamEditDto
+        {
+            ClassId = _e!.ClassId, SubjectId = _e.SubjectId, TermId = _e.TermId, Title = _e.Title, Type = _e.Type, Date = _e.Date,
+            MaxScore = _e.MaxScore, Weight = _e.Weight, Description = _e.Description
+        };
+        _modalError = null;
+        _editing = true;
+    }
+
+    private async Task SaveEdit()
+    {
+        _busy = true;
+        _modalError = null;
+        try
+        {
+            await Api.PutAsync($"api/exams/{Id}", _form);
+            _editing = false;
+            await Load();
+        }
+        catch (ApiException ex) { _modalError = ex.Friendly; }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        if (!await _confirm.AskAsync(L["Delete exam?"], $"\"{_e!.Title}\" and all its results will be removed.")) return;
+        try
+        {
+            await Api.DeleteAsync($"api/exams/{Id}");
+            Nav.NavigateTo("exams");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+}

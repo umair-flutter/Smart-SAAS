@@ -1,0 +1,17 @@
+<div class="mb-3">
+    <div class="d-flex justify-content-between small mb-1">
+        <span>@Label</span>
+        <span class="fw-semibold">@Used / @(Max?.ToString("N0") ?? "Unlimited")</span>
+    </div>
+    <div class="progress progress-sm">
+        <div class="progress-bar @(Percent >= 90 ? "bg-danger" : Percent >= 75 ? "bg-warning" : "")" style="width:@(Percent)%"></div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public int Used { get; set; }
+    [Parameter] public int? Max { get; set; }
+
+    private int Percent => Max is { } m && m > 0 ? Math.Min(100, Used * 100 / m) : 0;
+}

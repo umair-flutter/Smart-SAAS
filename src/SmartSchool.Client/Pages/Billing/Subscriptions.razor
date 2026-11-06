@@ -1,0 +1,13 @@
+@page "/subscriptions"
+@inject AppState State
+
+<PageTitle>@L["Subscriptions"] · SmartSchool</PageTitle>
+
+@if (State.Can(Permissions.Subscriptions.Manage))
+{
+    <SubscriptionManager />
+}
+else
+{
+    <SubscriptionOverview />
+}

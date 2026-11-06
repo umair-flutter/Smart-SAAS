@@ -1,0 +1,28 @@
+@inject FileHelper Files
+
+<div class="d-flex align-items-center gap-2 mb-2">
+    <span class="badge @(S.Status == SubmissionStatus.Submitted ? "bg-blue-lt" : "bg-green-lt")">@L[S.Status.ToString()]</span>
+    @if (S.IsLate) { <span class="badge bg-yellow-lt">@L["Late"]</span> }
+    <span class="small text-secondary">@L["Handed in"] @S.SubmittedAtUtc.ToLocalTime().ToString("g")</span>
+</div>
+@if (S.Score is { } score)
+{
+    <div class="display-6 fw-bold my-2">@score.ToString("0.##") <span class="fs-3 text-secondary">/ @(Max?.ToString("0.##") ?? "")</span></div>
+}
+@if (!string.IsNullOrWhiteSpace(S.Feedback))
+{
+    <div class="alert alert-success py-2"><i class="ti ti-message me-1"></i>@S.Feedback</div>
+}
+@if (!string.IsNullOrWhiteSpace(S.Text))
+{
+    <div class="border rounded p-2 small" style="white-space:pre-line">@S.Text</div>
+}
+@if (S.Attachment is { } f)
+{
+    <a role="button" class="btn btn-sm mt-2" @onclick="() => Files.DownloadAsync(f)"><i class="ti ti-paperclip me-1"></i>@f.FileName</a>
+}
+
+@code {
+    [Parameter, EditorRequired] public SubmissionDto S { get; set; } = default!;
+    [Parameter] public decimal? Max { get; set; }
+}

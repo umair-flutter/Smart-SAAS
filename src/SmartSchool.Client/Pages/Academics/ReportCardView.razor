@@ -1,0 +1,169 @@
+@page "/report-cards/{StudentId:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject FileHelper Files
+
+<PageTitle>@L["Report card"] · SmartSchool</PageTitle>
+
+@if (_error is not null)
+{
+    <a href="report-cards" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Report cards"]</a>
+    <div class="alert alert-info mt-2">@_error</div>
+}
+else if (_c is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+}
+else
+{
+    <div class="page-header mb-3 d-print-none">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <a href="report-cards" class="text-secondary small"><i class="ti ti-arrow-left me-1"></i>@L["Report cards"]</a>
+                <h1 class="page-title mt-1">@_c.StudentName <span class="text-secondary fw-normal ms-2">@_c.TermName</span></h1>
+            </div>
+            <div class="col-auto ms-auto btn-list">
+                @if (State.Can(Permissions.ReportCards.Export))
+                {
+                    <div class="btn-group">
+                        @foreach (var (lang, label) in new[] { ("en", "English"), ("fr", "Français"), ("ar", "العربية") })
+                        {
+                            <button class="btn" disabled="@_busy" @onclick="() => Pdf(lang)"><i class="ti ti-file-type-pdf me-1"></i>@label</button>
+                        }
+                    </div>
+                }
+                @if (IsEditor)
+                {
+                    <button class="btn btn-primary" disabled="@_busy" @onclick="SaveComments"><i class="ti ti-device-floppy me-1"></i>@L["Save comments"]</button>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (_c.Status != ReportCardStatus.Published && !IsFamily)
+    {
+        <div class="alert alert-warning py-2"><i class="ti ti-pencil me-1"></i>@L["Draft: families cannot see this report card until it is published from the class list."]</div>
+    }
+    else if (_c.Status == ReportCardStatus.Published && !IsFamily)
+    {
+        <div class="alert alert-success py-2"><i class="ti ti-lock me-1"></i>Published @_c.PublishedAtUtc?.ToLocalTime().ToString("g"). Withdraw the publication to change comments.</div>
+    }
+
+    <div class="card">
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-8">
+                    <div class="text-secondary small">@_c.SchoolName · @_c.AcademicYearName</div>
+                    <h2 class="mb-1">@_c.StudentName</h2>
+                    <div class="text-secondary">@_c.ClassName · No. @_c.StudentNo · Homeroom teacher: @(_c.HomeroomTeacher ?? "—")</div>
+                </div>
+                <div class="col-md-4 text-md-end mt-3 mt-md-0">
+                    <div class="text-secondary small">@L["Overall average"]</div>
+                    <div class="display-6 fw-bold @(_c.Average < 10 ? "text-danger" : "text-primary")">@(_c.Average?.ToString("0.00") ?? "—")<span class="fs-3 text-secondary"> /20</span></div>
+                    <div class="small">Rank <b>@(_c.Rank?.ToString() ?? "—")</b> of @_c.ClassSize · class average @(_c.ClassAverage?.ToString("0.00") ?? "—")</div>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-vcenter">
+                    <thead><tr><th>@L["Subject"]</th><th class="text-center">@L["Coef."]</th><th class="text-center">@L["Average"]</th><th class="text-center">@L["Class avg."]</th><th>@L["Teacher"]</th><th style="min-width:260px">@L["Comment"]</th></tr></thead>
+                    <tbody>
+                        @foreach (var s in _c.Subjects)
+                        {
+                            <tr>
+                                <td class="fw-semibold">@s.SubjectName <span class="small text-secondary">(@s.ExamCount exam@(s.ExamCount == 1 ? "" : "s"))</span></td>
+                                <td class="text-center">@s.Coefficient.ToString("0.#")</td>
+                                <td class="text-center fw-bold @(s.Average < 10 ? "text-danger" : "")">@(s.Average?.ToString("0.00") ?? "—")</td>
+                                <td class="text-center text-secondary">@(s.ClassAverage?.ToString("0.00") ?? "—")</td>
+                                <td class="small">@s.TeacherName</td>
+                                <td>
+                                    @if (_c.EditableSubjectIds.Contains(s.SubjectId))
+                                    {
+                                        <input class="form-control form-control-sm" placeholder="@L["Comment for this subject"]" value="@_comments.GetValueOrDefault(s.SubjectId)" @onchange="e => _comments[s.SubjectId] = e.Value?.ToString()" />
+                                    }
+                                    else { <span class="small fst-italic">@s.Comment</span> }
+                                </td>
+                            </tr>
+                        }
+                        @if (_c.Subjects.Count == 0) { <tr><td colspan="6" class="text-secondary">@L["No subjects are assigned to this class yet."]</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100">
+                        <div class="fw-semibold mb-2">@L["Attendance this term"]</div>
+                        <div class="d-flex justify-content-between small"><span>Days absent</span><b>@_c.AbsenceDays</b></div>
+                        <div class="d-flex justify-content-between small"><span>Unjustified</span><b class="@(_c.UnjustifiedAbsences > 0 ? "text-danger" : "")">@_c.UnjustifiedAbsences</b></div>
+                        <div class="d-flex justify-content-between small"><span>Late arrivals</span><b>@_c.LateCount</b></div>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <div class="border rounded p-3 h-100">
+                        <div class="fw-semibold mb-2">@L["General comment"]</div>
+                        @if (_c.CanEditGeneral)
+                        {
+                            <textarea class="form-control" rows="3" placeholder="@L["Homeroom teacher's overall comment"]" @bind="_general"></textarea>
+                        }
+                        else { <p class="mb-0">@(_c.GeneralComment ?? "—")</p> }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid StudentId { get; set; }
+    [SupplyParameterFromQuery] public Guid? TermId { get; set; }
+
+    private ReportCardDto? _c;
+    private string? _error;
+    private bool _busy;
+    private string? _general;
+    private Dictionary<Guid, string?> _comments = [];
+
+    private bool IsFamily => State.User?.RoleType is RoleType.Parent or RoleType.Student;
+    private bool IsEditor => _c is not null && (_c.CanEditGeneral || _c.EditableSubjectIds.Count > 0);
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            _c = await Api.GetAsync<ReportCardDto>($"api/report-cards/student/{StudentId}{(TermId is { } t ? $"?termId={t}" : "")}");
+            _general = _c.GeneralComment;
+            _comments = _c.Subjects.ToDictionary(s => s.SubjectId, s => s.Comment);
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private async Task SaveComments()
+    {
+        if (_c is null) return;
+        _busy = true;
+        try
+        {
+            await Api.PutAsync($"api/report-cards/student/{StudentId}/comments?termId={_c.TermId}", new ReportCardCommentsDto
+            {
+                GeneralComment = _c.CanEditGeneral ? _general ?? "" : null,
+                Subjects = _c.EditableSubjectIds.Select(id => new SubjectCommentDto { SubjectId = id, Comment = _comments.GetValueOrDefault(id) }).ToList()
+            });
+            Toasts.Success(L["Comments saved."]);
+            await Load();
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _busy = false; }
+    }
+
+    private async Task Pdf(string lang)
+    {
+        _busy = true;
+        await Files.DownloadUrlAsync($"api/report-cards/student/{StudentId}/pdf?termId={_c!.TermId}&lang={lang}", $"report-card-{lang}.pdf");
+        _busy = false;
+    }
+}

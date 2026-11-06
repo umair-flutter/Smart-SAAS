@@ -1,0 +1,59 @@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" id="@FormId">
+    <DataAnnotationsValidator />
+    <div class="row g-3">
+        <div class="col-md-7">
+            <label class="form-label required">@L["Name"]</label>
+            <InputText class="form-control" placeholder="@L["Grade 5 A"]" @bind-Value="Model.Name" />
+            <ValidationMessage For="() => Model.Name" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-5">
+            <label class="form-label">@L["Level"]</label>
+            <InputText class="form-control" placeholder="@L["Grade 5"]" @bind-Value="Model.Level" />
+        </div>
+        @if (ShowYear)
+        {
+            <div class="col-md-7">
+                <label class="form-label">@L["Academic year"]</label>
+                <InputSelect class="form-select" @bind-Value="Model.AcademicYearId">
+                    @foreach (var y in Lookups?.Years ?? [])
+                    {
+                        <option value="@y.Id">@y.Name</option>
+                    }
+                </InputSelect>
+            </div>
+        }
+        <div class="col-md-5">
+            <label class="form-label">@L["Capacity"]</label>
+            <InputNumber class="form-control" @bind-Value="Model.Capacity" />
+            <ValidationMessage For="() => Model.Capacity" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">@L["Homeroom teacher"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.HomeroomTeacherId">
+                <option value="">@L["None"]</option>
+                @foreach (var t in Lookups?.Teachers ?? [])
+                {
+                    <option value="@t.Id">@t.Name</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">@L["Room"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.RoomId">
+                <option value="">@L["None"]</option>
+                @foreach (var r in Lookups?.Rooms ?? [])
+                {
+                    <option value="@r.Id">@r.Name</option>
+                }
+            </InputSelect>
+        </div>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public ClassEditDto Model { get; set; } = default!;
+    [Parameter] public SchoolLookupsDto? Lookups { get; set; }
+    [Parameter] public bool ShowYear { get; set; } = true;
+    [Parameter] public string FormId { get; set; } = "class-form";
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+}

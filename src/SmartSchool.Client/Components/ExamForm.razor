@@ -1,0 +1,63 @@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" id="@FormId">
+    <DataAnnotationsValidator />
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label required">@L["Class"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.ClassId">
+                <option value="">@L["Select…"]</option>
+                @foreach (var c in Lookups?.Classes ?? []) { <option value="@c.Id">@c.Name</option> }
+            </InputSelect>
+            <ValidationMessage For="() => Model.ClassId" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label required">@L["Subject"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.SubjectId">
+                <option value="">@L["Select…"]</option>
+                @foreach (var s in Lookups?.Subjects ?? []) { <option value="@s.Id">@s.Name</option> }
+            </InputSelect>
+            <ValidationMessage For="() => Model.SubjectId" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-8">
+            <label class="form-label required">@L["Title"]</label>
+            <InputText class="form-control" placeholder="@L["e.g. Unit 3 test"]" @bind-Value="Model.Title" />
+            <ValidationMessage For="() => Model.Title" class="invalid-feedback d-block" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Type"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.Type">
+                @foreach (var t in Enum.GetValues<ExamType>()) { <option value="@t">@t</option> }
+            </InputSelect>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Date"]</label>
+            <InputDate class="form-control" @bind-Value="Model.Date" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">@L["Term"]</label>
+            <InputSelect class="form-select" @bind-Value="Model.TermId">
+                <option value="">@L["From the date"]</option>
+                @foreach (var t in Lookups?.Terms ?? []) { <option value="@t.Id">@t.Name</option> }
+            </InputSelect>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">@L["Out of"]</label>
+            <InputNumber class="form-control" @bind-Value="Model.MaxScore" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">@L["Weight"]</label>
+            <InputNumber class="form-control" @bind-Value="Model.Weight" />
+        </div>
+        <div class="col-12">
+            <label class="form-label">@L["Description"]</label>
+            <InputTextArea class="form-control" rows="2" @bind-Value="Model.Description" />
+        </div>
+        <div class="col-12 form-hint">@L["Scores are converted to /20 and weighted when computing report-card averages."]</div>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public ExamEditDto Model { get; set; } = default!;
+    [Parameter] public SchoolLookupsDto? Lookups { get; set; }
+    [Parameter] public string FormId { get; set; } = "exam-form";
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+}

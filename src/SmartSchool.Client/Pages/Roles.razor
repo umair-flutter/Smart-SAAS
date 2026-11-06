@@ -1,0 +1,242 @@
+@page "/roles"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@L["Roles & permissions"] · SmartSchool</PageTitle>
+
+<div class="page-header mb-3">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">@L["Platform"]</div>
+            <h1 class="page-title">@L["Roles & permissions"]</h1>
+        </div>
+        @if (State.Can(Permissions.Roles.Manage) && State.User?.TenantId is not null || State.IsSuperAdmin && State.ActiveTenantId is not null)
+        {
+            <div class="col-auto ms-auto"><button class="btn btn-primary" @onclick="() => OpenRole(null)"><i class="ti ti-plus me-1"></i>@L["New custom role"]</button></div>
+        }
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_roles is null || _catalog is null)
+{
+    <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading roles…</div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-lg-4">
+            <div class="list-group">
+                @foreach (var r in _roles)
+                {
+                    <button type="button" class="list-group-item list-group-item-action @(r.Id == _selected?.Id ? "active" : "")" @onclick="() => Select(r)">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="fw-semibold">@r.Name</div>
+                                <div class="small @(r.Id == _selected?.Id ? "" : "text-secondary")">@r.Type.DisplayName() · @r.UserCount users</div>
+                            </div>
+                            @if (r.IsSystem) { <span class="badge bg-secondary-lt">@L["System"]</span> }
+                        </div>
+                    </button>
+                }
+            </div>
+        </div>
+        <div class="col-lg-8">
+            @if (_selected is { } role)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">@role.Name</h3>
+                            <div class="text-secondary small">@role.Description</div>
+                        </div>
+                        @if (CanEdit)
+                        {
+                            <div class="card-actions btn-list">
+                                @if (!role.IsSystem)
+                                {
+                                    <button class="btn btn-sm" @onclick="() => OpenRole(role)"><i class="ti ti-pencil me-1"></i>@L["Rename"]</button>
+                                    @if (role.UserCount == 0)
+                                    {
+                                        <button class="btn btn-sm btn-ghost-danger" @onclick="() => DeleteRole(role)"><i class="ti ti-trash"></i></button>
+                                    }
+                                }
+                                <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+                                    @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                                    Save permissions
+                                </button>
+                            </div>
+                        }
+                    </div>
+                    <div class="card-body">
+                        @if (role.Type == RoleType.SuperAdmin)
+                        {
+                            <div class="alert alert-info">@L["The SuperAdmin role always has every permission."]</div>
+                        }
+                        else if (!CanEdit)
+                        {
+                            <div class="alert alert-secondary py-2">@L["You can view this role but not change it."]</div>
+                        }
+                        <div class="perm-grid">
+                            @foreach (var group in _catalog.GroupBy(p => p.Module))
+                            {
+                                <div class="border rounded p-3">
+                                    <div class="fw-semibold mb-2">@Humanize(group.Key)</div>
+                                    @foreach (var p in group)
+                                    {
+                                        <label class="form-check mb-1">
+                                            <input type="checkbox" class="form-check-input" disabled="@(!CanEdit)"
+                                                   checked="@(role.Type == RoleType.SuperAdmin || _working.Contains(p.Value))"
+                                                   @onchange="e => Toggle(p.Value, e)" />
+                                            <span class="form-check-label">@Humanize(p.Action)</span>
+                                        </label>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <p class="text-secondary small mt-3 mb-0">@L["Changes apply the next time affected users sign in."]</p>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<Modal @bind-Visible="_roleModal" Title="@(_roleId is null ? L["New custom role"] : L["Edit role"])">
+    <ChildContent>
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label required">@L["Name"]</label>
+                <input class="form-control" maxlength="100" placeholder="@L["e.g. Accountant, Librarian, Head of year"]" @bind="_roleForm.Name" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Description"]</label>
+                <input class="form-control" maxlength="300" @bind="_roleForm.Description" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">@L["Behaves like"]</label>
+                <select class="form-select" @bind="_roleForm.Type">
+                    @foreach (var t in Enum.GetValues<RoleType>().Where(t => t != RoleType.SuperAdmin && (State.IsSuperAdmin || t >= State.User!.RoleType)))
+                    {
+                        <option value="@t">@L[t.DisplayName()]</option>
+                    }
+                </select>
+                <div class="form-hint">@L["Decides which data the role can reach (whole organization, assigned schools, own classes, own children…). Pick the permissions after saving."]</div>
+            </div>
+        </div>
+        @if (_roleError is not null) { <div class="alert alert-danger mt-3 mb-0">@_roleError</div> }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-link link-secondary" @onclick="() => _roleModal = false">@L["Cancel"]</button>
+        <button class="btn btn-primary ms-auto" disabled="@_saving" @onclick="SaveRole">@L["Save"]</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog @ref="_confirm" />
+
+@code {
+    private bool _roleModal;
+    private Guid? _roleId;
+    private RoleEditDto _roleForm = new();
+    private string? _roleError;
+    private ConfirmDialog _confirm = default!;
+
+    private void OpenRole(RoleDto? r)
+    {
+        _roleId = r?.Id;
+        _roleForm = r is null
+            ? new RoleEditDto { Type = RoleType.Teacher }
+            : new RoleEditDto { Name = r.Name, Description = r.Description, Type = r.Type, Permissions = r.Permissions.ToList() };
+        _roleError = null;
+        _roleModal = true;
+    }
+
+    private async Task SaveRole()
+    {
+        if (string.IsNullOrWhiteSpace(_roleForm.Name)) { _roleError = L["Enter a name."]; return; }
+        _saving = true;
+        try
+        {
+            if (_roleId is { } id) await Api.PutAsync($"api/roles/{id}", _roleForm);
+            else
+            {
+                // A new role starts with the default permissions of the profile it behaves like.
+                _roleForm.Permissions = _roles?.FirstOrDefault(r => r.IsSystem && r.Type == _roleForm.Type)?.Permissions ?? [];
+                await Api.PostAsync<object>("api/roles", _roleForm);
+            }
+            _roleModal = false;
+            Toasts.Success(L["Role saved."]);
+            _roles = await Api.GetAsync<List<RoleDto>>("api/roles");
+            var selected = _roles.FirstOrDefault(r => r.Name == _roleForm.Name.Trim());
+            if (selected is not null) Select(selected);
+        }
+        catch (ApiException ex) { _roleError = ex.Friendly; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteRole(RoleDto r)
+    {
+        if (!await _confirm.AskAsync(L["Delete role?"], r.Name, L["Delete"])) return;
+        try
+        {
+            await Api.DeleteAsync($"api/roles/{r.Id}");
+            _roles = await Api.GetAsync<List<RoleDto>>("api/roles");
+            if (_roles.Count > 0) Select(_roles[0]);
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+    }
+
+    private List<RoleDto>? _roles;
+    private List<PermissionInfo>? _catalog;
+    private RoleDto? _selected;
+    private HashSet<string> _working = [];
+    private string? _error;
+    private bool _saving;
+
+    private bool CanEdit => _selected is { } r && r.Type != RoleType.SuperAdmin
+        && State.Can(Permissions.Roles.Manage) && (!r.IsSystem || State.IsSuperAdmin);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _catalog = await Api.GetAsync<List<PermissionInfo>>("api/roles/permissions");
+            _roles = await Api.GetAsync<List<RoleDto>>("api/roles");
+            if (_roles.Count > 0) Select(_roles[0]);
+        }
+        catch (ApiException ex) { _error = ex.Friendly; }
+    }
+
+    private void Select(RoleDto r)
+    {
+        _selected = r;
+        _working = r.Permissions.ToHashSet();
+    }
+
+    private void Toggle(string permission, ChangeEventArgs e)
+    {
+        if (e.Value is true) _working.Add(permission);
+        else _working.Remove(permission);
+    }
+
+    private async Task Save()
+    {
+        if (_selected is null) return;
+        _saving = true;
+        try
+        {
+            await Api.PutAsync($"api/roles/{_selected.Id}/permissions", new RolePermissionsUpdateDto { Permissions = _working.ToList() });
+            _selected.Permissions = _working.ToList();
+            Toasts.Success(L["Permissions saved."]);
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Friendly); }
+        finally { _saving = false; }
+    }
+
+    private static string Humanize(string s) =>
+        string.Concat(s.Select((c, i) => i > 0 && char.IsUpper(c) ? " " + char.ToLowerInvariant(c) : c.ToString()));
+}
