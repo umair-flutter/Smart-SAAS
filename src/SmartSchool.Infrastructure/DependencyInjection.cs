@@ -14,12 +14,23 @@ public static class DependencyInjection
         var connection = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Connection string 'Default' is missing.");
 
-        services.AddDbContext<AppDbContext>(o => o.UseSqlServer(connection, sql =>
+        // Database:Provider = "Sqlite" runs a self-contained demo database (used for the hosted demo).
+        var useSqlite = string.Equals(config["Database:Provider"], "Sqlite", StringComparison.OrdinalIgnoreCase);
+        services.AddDbContext<AppDbContext>(o =>
         {
+            if (useSqlite)
+            {
+                o.UseSqlite(config.GetConnectionString("Sqlite") ?? "Data Source=smartschool.db",
+                    sql => sql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery));
+                return;
+            }
+            o.UseSqlServer(connection, sql =>
+            {
             sql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
             sql.EnableRetryOnFailure(3);
             sql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
-        }));
+        });
+        });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services.Configure<JwtSettings>(config.GetSection(JwtSettings.Section));

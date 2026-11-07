@@ -1,5 +1,4 @@
-# Normalise line endings in the repository; check out with the platform default.
 * text=auto
 *.sh text eol=lf
-*.png binary
-*.ico binary
+Dockerfile text eol=lf
+*.conf text eol=lf

@@ -60,6 +60,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUser c
     public DbSet<PageView> PageViews => Set<PageView>();
     public DbSet<StatusOption> StatusOptions => Set<StatusOption>();
 
+    /// <summary>SQLite (hosted demo) can't sort or compare decimals, so store them as REAL there.</summary>
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+        if (Database.IsSqlite()) configurationBuilder.Properties<decimal>().HaveConversion<double>();
+    }
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

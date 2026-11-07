@@ -58,7 +58,8 @@ public class DbSeeder(AppDbContext db, IPasswordService passwords, IOptions<Seed
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
-        await db.Database.MigrateAsync(ct);
+        // SQL Server uses migrations; the SQLite demo database is created straight from the model.
+        if (db.Database.IsSqlite()) await db.Database.EnsureCreatedAsync(ct); else await db.Database.MigrateAsync(ct);
 
         var roles = await EnsureSystemRoles(ct);
         await EnsureSuperAdmin(roles[RoleType.SuperAdmin], ct);

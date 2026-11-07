@@ -1,0 +1,23 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repository.
+# Keys marked "sync: false" are asked for once in the Render dashboard (never commit real passwords).
+services:
+  - type: web
+    name: smart-school-saas
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: Jwt__SigningKey
+        generateValue: true
+      - key: Seed__SuperAdminPassword
+        sync: false
+      - key: Seed__DemoPassword
+        sync: false
+      - key: Seed__CreateDemoData
+        value: "true"
+      - key: Seed__ShowDemoAccounts
+        value: "true"
