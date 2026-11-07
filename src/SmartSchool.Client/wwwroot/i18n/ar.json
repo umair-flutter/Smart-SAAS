@@ -664,5 +664,7 @@
   "Recorded, not validated": "مسجل، غير مصادق عليه",
   "Submitted": "مُسلَّم",
   "Graded": "منقط",
-  "Returned": "مُعاد"
+  "Returned": "مُعاد",
+  "Save permissions": "حفظ الصلاحيات",
+  "SuperAdmin": "المشرف العام"
 }

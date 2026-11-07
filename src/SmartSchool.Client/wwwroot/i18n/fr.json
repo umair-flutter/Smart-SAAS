@@ -667,5 +667,7 @@
   "Recorded, not validated": "Saisi, non validé",
   "Submitted": "Rendu",
   "Graded": "Noté",
-  "Returned": "Retourné"
+  "Returned": "Retourné",
+  "Save permissions": "Enregistrer les permissions",
+  "SuperAdmin": "Super administrateur"
 }

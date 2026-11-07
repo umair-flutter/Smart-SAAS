@@ -164,12 +164,28 @@ else if (State.User is { } user)
         }
         _ready = true;
 
-        // The language saved on the account wins at sign-in (it reloads the page once when it differs).
-        if (State.User is { } u && u.Language != L.Language && u.Language is "en" or "fr" or "ar")
+        // A language picked on the sign-in page is saved to the account; otherwise the account's
+        // saved language wins (the page reloads once when it differs from this browser's).
+        if (State.User is { } u && u.Language != L.Language)
         {
-            await Localizer.ChangeAsync(JS, u.Language);
-            return;
+            var picked = await JS.InvokeAsync<string?>("smartSchool.storageGet", Localizer.PickedKey);
+            if (picked == "1")
+            {
+                var parts = u.FullName.Split(' ', 2);
+                try
+                {
+                    State.SetUser(await Api.PutAsync<CurrentUserDto>("api/me/profile",
+                        new ProfileUpdateDto { FirstName = parts[0], LastName = parts.ElementAtOrDefault(1) ?? parts[0], Language = L.Language }));
+                }
+                catch (ApiException) { /* keep the browser's choice for this visit */ }
+            }
+            else if (u.Language is "en" or "fr" or "ar")
+            {
+                await Localizer.ChangeAsync(JS, u.Language);
+                return;
+            }
         }
+        await JS.InvokeVoidAsync("smartSchool.storageRemove", Localizer.PickedKey);
 
         Nav.LocationChanged += OnLocationChanged;
         TrackPageView(Nav.Uri);

@@ -17,7 +17,7 @@
                 <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="@L["Language"]">
                     @foreach (var (code, name) in Localizer.Languages)
                     {
-                        <button type="button" class="btn @(L.Language == code ? "btn-primary" : "")" @onclick="() => Localizer.ChangeAsync(JS, code)">@name</button>
+                        <button type="button" class="btn @(L.Language == code ? "btn-primary" : "")" @onclick="() => PickLanguage(code)">@name</button>
                     }
                 </div>
             </div>
@@ -44,7 +44,7 @@
                             <button type="button" class="quick-role @(_model.Email == d.Email ? "active" : "")" @onclick="() => Pick(d)">
                                 <span class="badge-initials">@d.Initials</span>
                                 <span class="d-grid">
-                                    <span class="role-name">@d.RoleName</span>
+                                    <span class="role-name">@L[d.RoleName]</span>
                                     <span class="role-email">@d.Email</span>
                                 </span>
                             </button>
@@ -83,7 +83,7 @@
                     {
                         <span class="spinner-border spinner-border-sm me-2"></span>
                     }
-                    Sign in
+                    @L["Sign in"]
                 </button>
             </EditForm>
         </div>
@@ -110,6 +110,13 @@
         }
         try { _demo = await Api.GetAsync<List<DemoAccount>>("api/auth/demo-accounts"); }
         catch { _demo = []; }
+    }
+
+    private async Task PickLanguage(string code)
+    {
+        // Remember that this was a deliberate choice, so it is saved to the account after sign-in.
+        await JS.InvokeVoidAsync("smartSchool.storageSet", Localizer.PickedKey, "1");
+        await Localizer.ChangeAsync(JS, code);
     }
 
     private void Pick(DemoAccount d)

@@ -11,6 +11,9 @@ namespace SmartSchool.Client.Services;
 public sealed class Localizer
 {
     public const string StorageKey = "ss.lang";
+
+    /// <summary>Set when the language was picked on the sign-in page, so it is saved to the account after sign-in.</summary>
+    public const string PickedKey = "ss.lang.picked";
     public static readonly (string Code, string Name)[] Languages = [("en", "English"), ("fr", "Français"), ("ar", "العربية")];
 
     private Dictionary<string, string> _strings = [];

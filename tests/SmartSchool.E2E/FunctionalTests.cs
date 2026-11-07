@@ -120,6 +120,32 @@ public class FunctionalTests(BrowserFixture fx)
     }
 
     [Fact]
+    public async Task Language_picked_before_sign_in_is_kept_after_sign_in()
+    {
+        var page = await fx.NewPageAsync();
+        await page.GotoAsync(Url("login"));
+        await page.GetByRole(AriaRole.Button, new() { Name = "Français" }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Se connecter" })).ToBeVisibleAsync();
+
+        await page.Locator("#email").FillAsync("schooladmin@demo-academy.local");
+        await page.Locator("#password").FillAsync(BrowserFixture.DemoPassword);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Se connecter", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(url => !url.Contains("/login"));
+
+        var menu = page.Locator("aside.navbar-vertical");
+        await Expect(menu.GetByText("Élèves", new() { Exact = true })).ToBeVisibleAsync();
+        await Expect(menu.GetByText("Emploi du temps", new() { Exact = true })).ToBeVisibleAsync();
+
+        // Put the demo account back to English for the other tests.
+        var token = await page.EvaluateAsync<string>("localStorage.getItem('ss.token')");
+        await page.APIRequest.PutAsync(Url("api/me/profile"), new()
+        {
+            Headers = new Dictionary<string, string> { ["Authorization"] = $"Bearer {token}" },
+            DataObject = new { firstName = "Karim", lastName = "Mansour", language = "en" }
+        });
+    }
+
+    [Fact]
     public async Task Health_endpoint_reports_the_database()
     {
         var page = await fx.NewPageAsync();
